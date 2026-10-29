@@ -23,11 +23,12 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                // Public / documentation endpoints
+                // Public frontend assets & documentation endpoints
+                .requestMatchers("/", "/index.html", "/app.js", "/styles.css", "/favicon.svg").permitAll()
                 .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-ui.html").permitAll()
                 .requestMatchers("/actuator/health", "/actuator/info").permitAll()
 
-                // GET operations on fleet and plans: VIEWER, OPERATOR, ADMIN
+                // GET operations on fleet, hubs, overview, and plans: VIEWER, OPERATOR, ADMIN
                 .requestMatchers(HttpMethod.GET, "/api/v1/**").hasAnyRole("VIEWER", "OPERATOR", "ADMIN")
 
                 // Plan Acceptance & Replanning: OPERATOR, ADMIN
@@ -36,7 +37,7 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/api/v1/replanning/**").hasAnyRole("OPERATOR", "ADMIN")
 
                 // Vehicle, Hub, and Trip registration: OPERATOR, ADMIN
-                .requestMatchers(HttpMethod.POST, "/api/v1/vehicles/**", "/api/v1/trips/**").hasAnyRole("OPERATOR", "ADMIN")
+                .requestMatchers(HttpMethod.POST, "/api/v1/vehicles/**", "/api/v1/trips/**", "/api/v1/hubs/**").hasAnyRole("OPERATOR", "ADMIN")
 
                 // All other API requests must be authenticated
                 .requestMatchers("/api/v1/**").authenticated()

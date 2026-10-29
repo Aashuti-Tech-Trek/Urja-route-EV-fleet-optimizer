@@ -6,6 +6,7 @@ import com.moveinsync.evfleet.api.dto.PlanProposalResponse;
 import com.moveinsync.evfleet.api.dto.PlanVersionResponse;
 import com.moveinsync.evfleet.domain.*;
 import com.moveinsync.evfleet.location.Location;
+import com.moveinsync.evfleet.observability.PlanningMetrics;
 import com.moveinsync.evfleet.persistence.entity.*;
 import com.moveinsync.evfleet.persistence.repository.*;
 import com.moveinsync.evfleet.planner.*;
@@ -15,6 +16,8 @@ import com.moveinsync.evfleet.time.TariffSchedule;
 import com.moveinsync.evfleet.validator.DefaultPlanValidator;
 import com.moveinsync.evfleet.validator.PlanValidator;
 import com.moveinsync.evfleet.validator.ValidationReport;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,6 +29,8 @@ import java.util.*;
 @Service
 public class FleetPersistenceService {
 
+    private static final Logger log = LoggerFactory.getLogger(FleetPersistenceService.class);
+
     private final TenantRepository tenantRepository;
     private final VehicleRepository vehicleRepository;
     private final ChargerHubRepository chargerHubRepository;
@@ -36,6 +41,7 @@ public class FleetPersistenceService {
     private final ChargingSessionRepository chargingSessionRepository;
     private final AuditRecordRepository auditRecordRepository;
     private final IdempotencyRecordRepository idempotencyRecordRepository;
+    private final PlanningMetrics planningMetrics;
     private final ObjectMapper objectMapper;
 
     public FleetPersistenceService(TenantRepository tenantRepository,
@@ -47,7 +53,8 @@ public class FleetPersistenceService {
                                    TripAssignmentRepository tripAssignmentRepository,
                                    ChargingSessionRepository chargingSessionRepository,
                                    AuditRecordRepository auditRecordRepository,
-                                   IdempotencyRecordRepository idempotencyRecordRepository) {
+                                   IdempotencyRecordRepository idempotencyRecordRepository,
+                                   PlanningMetrics planningMetrics) {
         this.tenantRepository = tenantRepository;
         this.vehicleRepository = vehicleRepository;
         this.chargerHubRepository = chargerHubRepository;
@@ -58,6 +65,7 @@ public class FleetPersistenceService {
         this.chargingSessionRepository = chargingSessionRepository;
         this.auditRecordRepository = auditRecordRepository;
         this.idempotencyRecordRepository = idempotencyRecordRepository;
+        this.planningMetrics = planningMetrics;
         this.objectMapper = new ObjectMapper().findAndRegisterModules();
     }
 
@@ -176,7 +184,35 @@ public class FleetPersistenceService {
 
         PlanningInput input = new PlanningInput("RUN-" + UUID.randomUUID(), vehicles, trips, hubs);
         GreedyFleetPlanner planner = GreedyFleetPlanner.createDefault();
-        FleetPlanResult planResult = planner.plan(input);
+
+        FleetPlanResult planResult;
+        try {
+            planResult = planningMetrics.recordPlanningDuration(() -> planner.plan(input));
+            planningMetrics.recordSuccess();
+        } catch (RuntimeException e) {
+            planningMetrics.recordFailure();
+            throw e;
+        } catch (Exception e) {
+            planningMetrics.recordFailure();
+            throw new RuntimeException("Planning failed", e);
+        }
+
+        // Record trip assignment metrics
+        int evAssigned = planResult.getEvAssignments().size();
+        int backupAssigned = planResult.getTotalBackupTripCount();
+        planningMetrics.recordTripsAssigned(evAssigned);
+        planningMetrics.recordTripsUnassigned(backupAssigned);
+        planningMetrics.recordTotalCost(planResult.getTotalChargingCost().doubleValue());
+
+        // Record candidate evaluations from quality report if available
+        if (planResult.getQualityReport() != null) {
+            planningMetrics.recordCandidatesEvaluated(
+                planResult.getQualityReport().getCandidateEvaluations());
+        }
+
+        log.info("Planning completed: tenant={}, evAssigned={}, backup={}, cost={}, duration={}",
+                tenantId, evAssigned, backupAssigned,
+                planResult.getTotalChargingCost(), planResult.getExecutionDuration());
 
         PlanValidator validator = new DefaultPlanValidator();
         ValidationReport report = validator.validate(planResult, input);
@@ -318,5 +354,53 @@ public class FleetPersistenceService {
     @Transactional
     public void saveIdempotencyRecord(String key, String tenantId, String requestFingerprint, String payload, int status) {
         idempotencyRecordRepository.save(new IdempotencyRecordEntity(key, tenantId, requestFingerprint, payload, status));
+    }
+
+    public com.moveinsync.evfleet.api.dto.OverviewResponse getOverview(String tenantId) {
+        int vehicleCount = vehicleRepository.findByTenantId(tenantId).size();
+        List<TripEntity> trips = tripRepository.findByTenantId(tenantId);
+        int tripCount = trips.size();
+        List<ChargerHubEntity> hubs = chargerHubRepository.findByTenantId(tenantId);
+        int hubCount = hubs.size();
+        int totalChargers = hubs.stream().mapToInt(ChargerHubEntity::getTotalChargers).sum();
+
+        Optional<PlanVersionEntity> activeVersionOpt = planVersionRepository.findByTenantIdAndStatus(tenantId, "ACCEPTED");
+        long currentVersion = activeVersionOpt.map(PlanVersionEntity::getVersionNumber).orElse(0L);
+
+        double serviceRate = 0.0;
+        double latestCost = 0.0;
+        int evAssigned = 0;
+        int backupTrips = 0;
+
+        if (activeVersionOpt.isPresent()) {
+            String proposalId = activeVersionOpt.get().getProposalId();
+            Optional<PlanProposalEntity> proposalOpt = planProposalRepository.findById(proposalId);
+            if (proposalOpt.isPresent()) {
+                PlanProposalEntity proposal = proposalOpt.get();
+                serviceRate = proposal.getServiceRate();
+                latestCost = proposal.getTotalCost();
+
+                List<TripAssignmentEntity> assignments = tripAssignmentRepository.findByPlanProposalIdOrderBySequenceOrderAsc(proposalId);
+                for (TripAssignmentEntity a : assignments) {
+                    if ("BACKUP".equalsIgnoreCase(a.getVehicleId())) {
+                        backupTrips++;
+                    } else {
+                        evAssigned++;
+                    }
+                }
+            }
+        }
+
+        return new com.moveinsync.evfleet.api.dto.OverviewResponse(
+            vehicleCount,
+            tripCount,
+            hubCount,
+            totalChargers,
+            currentVersion,
+            serviceRate,
+            latestCost,
+            evAssigned,
+            backupTrips
+        );
     }
 }

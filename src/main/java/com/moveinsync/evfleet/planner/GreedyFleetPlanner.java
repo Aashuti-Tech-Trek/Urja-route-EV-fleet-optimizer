@@ -90,7 +90,7 @@ public final class GreedyFleetPlanner implements FleetPlanner {
         DistanceMatrix dm = new DistanceMatrix(estimator);
         TripFeasibilityChecker checker = new TripFeasibilityChecker(em, factors, estimator, dm);
         ChargingScheduler scheduler = new ChargingScheduler(em, factors, new TwoPartChargingCurve(), estimator, dm);
-        return new GreedyFleetPlanner(checker, scheduler, dm, estimator, em, factors, LocalSearchConfig.of(10, 500));
+        return new GreedyFleetPlanner(checker, scheduler, dm, estimator, em, factors, LocalSearchConfig.disabled());
     }
 
     @Override
@@ -256,8 +256,12 @@ public final class GreedyFleetPlanner implements FleetPlanner {
             String primaryRejectionDetail = null;
 
             for (Vehicle v : sortedVehicles) {
-                candidateEvaluations++;
                 VehicleTimeline timeline = timelines.get(v.getVehicleId());
+                if (timeline.getCurrentAvailableTime().isAfter(trip.getScheduledStartTime())) {
+                    continue;
+                }
+
+                candidateEvaluations++;
                 Vehicle dynamicVehicle = createDynamicVehicle(v, timeline);
 
                 FeasibilityResult directCheck = feasibilityChecker.check(dynamicVehicle, trip);
@@ -266,6 +270,9 @@ public final class GreedyFleetPlanner implements FleetPlanner {
                     CandidateSelection candidate = CandidateSelection.direct(v, deadheadDist);
                     if (bestCandidate == null || candidate.compareTo(bestCandidate) < 0) {
                         bestCandidate = candidate;
+                        if (deadheadDist <= 0.0) {
+                            break; // Perfect zero-deadhead match found
+                        }
                     }
                 } else {
                     if (primaryRejectionReason == FeasibilityReason.NONE
@@ -275,7 +282,7 @@ public final class GreedyFleetPlanner implements FleetPlanner {
                         primaryRejectionDetail = directCheck.getExplanation();
                     }
 
-                    if (isEnergyRelatedFailure(directCheck.getReason()) && !input.getHubs().isEmpty()) {
+                    if (bestCandidate == null && isEnergyRelatedFailure(directCheck.getReason()) && !input.getHubs().isEmpty()) {
                         CandidateSelection chargingCandidate = evaluateChargingOpportunity(
                                 dynamicVehicle, timeline, trip, input.getHubs(), occupancyTracker);
                         if (chargingCandidate != null) {

@@ -226,4 +226,69 @@ public class SecurityAndReliabilityIntegrationTest {
                 .content(badWindowJson))
             .andExpect(status().isBadRequest());
     }
+
+    @Test
+    @DisplayName("Hub & Overview: OPERATOR can register hub and VIEWER can inspect live overview")
+    void testHubsAndOverviewEndpoints() throws Exception {
+        String tenant = "tenant-overview-" + UUID.randomUUID();
+        String operatorKey = "key-operator-" + tenant;
+        String viewerKey = "key-viewer-" + tenant;
+
+        ChargerHubRequest hubReq = new ChargerHubRequest("HUB-TEST-1", "Test Hub", "LOCATION-1", 4);
+
+        // Operator registers hub
+        mockMvc.perform(post("/api/v1/hubs")
+                .header("X-API-KEY", operatorKey)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(hubReq)))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.id").value("HUB-TEST-1"))
+            .andExpect(jsonPath("$.totalChargers").value(4));
+
+        // Viewer fetches hubs
+        mockMvc.perform(get("/api/v1/hubs")
+                .header("X-API-KEY", viewerKey))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$", hasSize(1)))
+            .andExpect(jsonPath("$[0].name").value("Test Hub"));
+
+        // Viewer fetches overview
+        mockMvc.perform(get("/api/v1/overview")
+                .header("X-API-KEY", viewerKey))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.hubCount").value(1))
+            .andExpect(jsonPath("$.totalChargers").value(4))
+            .andExpect(jsonPath("$.vehicleCount").value(0))
+            .andExpect(jsonPath("$.tripCount").value(0));
+    }
+
+    @Test
+    @DisplayName("Optimistic Locking: Stale plan version acceptance returns 409 Conflict")
+    void testStalePlanVersionConflictReturns409() throws Exception {
+        String tenant = "tenant-stale-ver-" + UUID.randomUUID();
+        String opKey = "key-operator-" + tenant;
+        Instant now = Instant.now();
+
+        fleetService.registerHub(tenant, new ChargerHubEntity("hub-stale", tenant, "Hub", "HUB_LOC", 4));
+        fleetService.registerVehicle(tenant, new com.moveinsync.evfleet.persistence.entity.VehicleEntity(
+            "EV-STALE", tenant, 0.90, 60.0, 0.20, 50.0, "BASE", now
+        ));
+        fleetService.registerTrip(tenant, new com.moveinsync.evfleet.persistence.entity.TripEntity(
+            "TRIP-STALE", tenant, "BASE", "AIRPORT", now.plus(Duration.ofMinutes(10)),
+            now.plus(Duration.ofMinutes(30)), now.plus(Duration.ofMinutes(60)), 10.0, 1, "PENDING"
+        ));
+
+        PlanProposalResponse proposal = fleetService.generatePlanProposal(
+            tenant, now, now.plus(Duration.ofHours(12)), List.of("EV-STALE"), List.of("TRIP-STALE")
+        );
+
+        // Attempting to accept with expectedCurrentVersion = 5 when actual is 0 -> 409 Conflict
+        AcceptPlanRequest staleReq = new AcceptPlanRequest(5L);
+        mockMvc.perform(post("/api/v1/plans/" + proposal.proposalId() + "/accept")
+                .header("X-API-KEY", opKey)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(staleReq)))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.title").value("Conflict / State Conflict"));
+    }
 }
