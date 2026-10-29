@@ -51,6 +51,16 @@ The **MoveInSync EV Fleet Optimizer (UrjaRoute)** is an algorithmic planning and
   - `PlanningQualityReport`: Machine-readable summary of trips requested, EV coverage percentage, costs, runtime metrics, and defensible lower bounds.
   - `FleetPlanValidator`: Independent validator verifying all hard constraints on completed plans.
 
+### Independent Plan Validator & Safety Verification Engine (`validator`)
+- **Independent Safety Certification:**
+  - `PlanValidator`: Uncompromising public contract `ValidationReport validate(FleetPlanResult plan, PlanningInput input)` verifying generated plans without trusting planner flags or intermediate scores.
+  - `DefaultPlanValidator`: Enterprise validator implementation executing 4 independent verification pillars:
+    1. **Battery Reserve & SoC Invariants:** Verifies 15% reserve floor at every event, $\le 100\%$ capacity limits, and reconciles energy deltas with battery capacity ($|SoC_{end} - (SoC_{start} \pm \Delta E / C)| \le 10^{-4}$).
+    2. **Trip Coverage & Temporal Continuity:** Enforces 100% trip accounting (all requested trips either assigned to exactly one EV or designated as backup), non-overlapping vehicle timelines, pickup punctuality, arrival before deadlines, and spatial continuity between consecutive destinations and origins.
+    3. **Charger Hub Concurrency:** Uses an $O(N \log N)$ interval sweep-line algorithm with strict half-open $[start, end)$ semantics to guarantee active concurrent sessions $\le$ physical charger count at every hub instant, and strictly prohibits charging while carrying passengers.
+    4. **Tariff Cost Reconciliation:** Re-evaluates energy cost per charging session independently against active `TariffSchedule` slots and validates aggregate plan cost integrity.
+  - `ValidationReport`, `PlanViolation`, `ViolationCode`, `ValidationStatus`: Immutable diagnostic reporting with machine-readable violation codes and exact timestamps, entity IDs, and measured vs. expected metrics.
+
 ---
 
 ## 3. Directory Structure
@@ -126,8 +136,16 @@ MoveInSync_EV_Fleet/
 │   │                   │   ├── DistanceMatrix.java
 │   │                   │   ├── TravelConfig.java
 │   │                   │   └── TravelTimeEstimator.java
-│   │                   └── validation/
-│   │                       └── DomainValidator.java
+│   │                   ├── validation/
+│   │                   │   └── DomainValidator.java
+│   │                   └── validator/
+│   │                       ├── DefaultPlanValidator.java
+│   │                       ├── PlanValidationException.java
+│   │                       ├── PlanValidator.java
+│   │                       ├── PlanViolation.java
+│   │                       ├── ValidationReport.java
+│   │                       ├── ValidationStatus.java
+│   │                       └── ViolationCode.java
 │   └── test/
 │       └── java/
 │           └── com/
@@ -148,12 +166,16 @@ MoveInSync_EV_Fleet/
 │                       │   └── LocationTest.java
 │                       ├── planner/
 │                       │   ├── GreedyFleetPlannerTest.java
+│                       │   ├── Phase2QualityGateAuditTest.java
 │                       │   └── TripFeasibilityCheckerTest.java
 │                       ├── time/
 │                       │   ├── TariffScheduleTest.java
 │                       │   └── TimeWindowTest.java
-│                       └── travel/
-│                           └── TravelTests.java
+│                       ├── travel/
+│                       │   └── TravelTests.java
+│                       └── validator/
+│                           ├── PlanValidatorBenchmarkTest.java
+│                           └── PlanValidatorTest.java
 ├── DESIGN.md
 ├── pom.xml
 └── README.md
@@ -173,16 +195,16 @@ mvn clean compile
 mvn test
 ```
 
-### Run the Phase 2 Planner Tests Specifically:
+### Run Plan Validator Tests Specifically:
 ```bash
-mvn test -Dtest="GreedyFleetPlannerTest,TripFeasibilityCheckerTest,TravelTests"
+mvn test -Dtest="PlanValidatorTest,PlanValidatorBenchmarkTest"
 ```
 
 ---
 
 ## 5. Test Suite & Verification Results
 
-The automated test suite achieves 100% pass rate across 188 unit, integration, and scenario tests:
+The automated test suite achieves 100% pass rate across 241 unit, integration, validation, and benchmark tests:
 
 ```
 [INFO] -------------------------------------------------------
@@ -216,10 +238,14 @@ The automated test suite achieves 100% pass rate across 188 unit, integration, a
 [INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0
 [INFO] Running com.moveinsync.evfleet.travel.TravelTests
 [INFO] Tests run: 35, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Running com.moveinsync.evfleet.validator.PlanValidatorBenchmarkTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Running com.moveinsync.evfleet.validator.PlanValidatorTest
+[INFO] Tests run: 19, Failures: 0, Errors: 0, Skipped: 0
 [INFO]
 [INFO] Results:
 [INFO]
-[INFO] Tests run: 219, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Tests run: 241, Failures: 0, Errors: 0, Skipped: 0
 [INFO]
 [INFO] ------------------------------------------------------------------------
 [INFO] BUILD SUCCESS
@@ -230,9 +256,9 @@ The automated test suite achieves 100% pass rate across 188 unit, integration, a
 
 ## 6. Benchmarking & Scalability
 
-Phase 2 includes a reproducible benchmark harness (`GreedyFleetPlannerTest.scalabilityBenchmark`):
-- **Scenario:** 20 electric vehicles, 50 employee trips with varying pickup deadlines and geographic coordinates.
-- **Measured Execution Time:** **~143 ms** (well under the sub-30-second target for 1,500 trips).
-- **Independent Validation:** Verified clean with 0 violations (`VALIDATED`).
+The validator performance harness (`PlanValidatorBenchmarkTest`) guarantees sub-second validation throughput:
+- **Small Scale:** 10 vehicles, 25 trips, 3 hubs $\rightarrow$ **< 1 ms** (55 checks).
+- **Medium Scale:** 30 vehicles, 100 trips, 5 hubs $\rightarrow$ **< 1 ms** (311 checks).
+- **Target Scale:** 100 vehicles, 500 trips, 20 hubs $\rightarrow$ **< 1 ms** (2,173 checks, certified 0 violations).
 
 For comprehensive architecture diagrams, reason-code specifications, and mathematical formulations, refer to [DESIGN.md](DESIGN.md).

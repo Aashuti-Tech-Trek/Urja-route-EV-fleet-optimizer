@@ -41,7 +41,7 @@ public final class VehicleTimeline {
         this.events = new ArrayList<>();
     }
 
-    private VehicleTimeline(String vehicleId, Location initialLocation,
+    public VehicleTimeline(String vehicleId, Location initialLocation,
                             Instant initialAvailableTime, double initialSoc,
                             double batteryCapacityKwh, List<TimelineEvent> events) {
         this.vehicleId = vehicleId;

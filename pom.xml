@@ -55,7 +55,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <argLine>-Xmx512m</argLine>
+                    <argLine>-XX:+EnableDynamicAgentLoading -Xms64m -Xmx256m -XX:ReservedCodeCacheSize=48m -XX:+UseSerialGC</argLine>
                 </configuration>
             </plugin>
         </plugins>

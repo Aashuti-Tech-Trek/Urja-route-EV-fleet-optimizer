@@ -182,8 +182,8 @@ public final class GreedyFleetPlanner implements FleetPlanner {
                 null
         );
 
-        FleetPlanValidator.ValidationReport validationReport = validator.validate(unvalidatedResult, input);
-        String validationStatus = validationReport.isValid() ? "VALIDATED" : "VIOLATIONS_DETECTED";
+        com.moveinsync.evfleet.validator.ValidationReport detailedReport = validator.validateDetailed(unvalidatedResult, input);
+        String validationStatus = detailedReport.isValid() ? "VALIDATED" : "VIOLATIONS_DETECTED";
 
         PlanningQualityReport qualityReport = new PlanningQualityReport(
                 baselineTrips.size(),
@@ -196,7 +196,7 @@ public final class GreedyFleetPlanner implements FleetPlanner {
                 duration,
                 localSearchIterations,
                 totalCandidateEvaluations,
-                validationReport.isValid(),
+                detailedReport.isValid(),
                 backupLowerBound,
                 lowerBoundAssumptions
         );
@@ -214,7 +214,8 @@ public final class GreedyFleetPlanner implements FleetPlanner {
                 duration,
                 HEURISTIC_VERSION,
                 validationStatus,
-                qualityReport
+                qualityReport,
+                detailedReport
         );
     }
 

@@ -34,6 +34,7 @@ public final class FleetPlanResult {
     private final String heuristicVersion;
     private final String validationStatus;
     private final PlanningQualityReport qualityReport;
+    private final com.moveinsync.evfleet.validator.ValidationReport validationReport;
 
     public FleetPlanResult(String planningRunId, PlanStatus status,
                            List<TripAssignment> tripAssignments,
@@ -43,6 +44,20 @@ public final class FleetPlanResult {
                            String currency, Map<String, BigDecimal> costByHub,
                            Duration executionDuration, String heuristicVersion,
                            String validationStatus, PlanningQualityReport qualityReport) {
+        this(planningRunId, status, tripAssignments, vehicleTimelines, chargingSessions,
+                totalBackupTripCount, totalChargingCost, currency, costByHub,
+                executionDuration, heuristicVersion, validationStatus, qualityReport, null);
+    }
+
+    public FleetPlanResult(String planningRunId, PlanStatus status,
+                           List<TripAssignment> tripAssignments,
+                           Map<String, VehicleTimeline> vehicleTimelines,
+                           List<ChargingSession> chargingSessions,
+                           int totalBackupTripCount, BigDecimal totalChargingCost,
+                           String currency, Map<String, BigDecimal> costByHub,
+                           Duration executionDuration, String heuristicVersion,
+                           String validationStatus, PlanningQualityReport qualityReport,
+                           com.moveinsync.evfleet.validator.ValidationReport validationReport) {
         this.planningRunId = Objects.requireNonNull(planningRunId, "planningRunId");
         this.status = Objects.requireNonNull(status, "status");
         this.tripAssignments = List.copyOf(Objects.requireNonNull(tripAssignments, "tripAssignments"));
@@ -56,6 +71,7 @@ public final class FleetPlanResult {
         this.heuristicVersion = Objects.requireNonNull(heuristicVersion, "heuristicVersion");
         this.validationStatus = Objects.requireNonNull(validationStatus, "validationStatus");
         this.qualityReport = qualityReport;
+        this.validationReport = validationReport;
     }
 
     public String getPlanningRunId() { return planningRunId; }
@@ -71,6 +87,7 @@ public final class FleetPlanResult {
     public String getHeuristicVersion() { return heuristicVersion; }
     public String getValidationStatus() { return validationStatus; }
     public PlanningQualityReport getQualityReport() { return qualityReport; }
+    public com.moveinsync.evfleet.validator.ValidationReport getValidationReport() { return validationReport; }
 
     public List<TripAssignment> getEvAssignments() {
         return tripAssignments.stream().filter(a -> a.isEvAssignment()).collect(Collectors.toList());
