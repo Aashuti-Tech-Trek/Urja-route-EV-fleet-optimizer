@@ -75,6 +75,15 @@ The **MoveInSync EV Fleet Optimizer (UrjaRoute)** is an algorithmic planning and
 - **Service Orchestration (`explain`):**
   - `PlanExplanationService`: Zero-mutation, deterministic service generating comprehensive `PlanExplanation` records from inputs, fleet plan results, and independent validation reports.
 
+### Phase 5: Live Replanning & Failure Recovery (COMPLETE)
+- **Real-Time Telemetry & Event Handling (`replan`):**
+  - `BatteryDriftEvent`: Models real-world telemetry battery SoC deviations with validation $[0.0, 1.0]$ and stale event filtering.
+  - `ChargerFailureEvent`: Models unexpected charger outages with half-open $[start, end)$ intervals and recovery awareness.
+- **Bounded Incremental Repair Engine (`replan`):**
+  - `ReplanningService`: High-performance replanning engine targeting $< 2.0\text{s}$ SLA with strict preservation of completed past trips.
+  - `ReplanningResult` & `ReplanningOutcome`: Diagnostic replanning audit recording preserved/changed assignments, charging session shifts, backup delta, and runtime metrics.
+  - Re-evaluates all generated replacement proposals through independent `PlanValidator`.
+
 ---
 
 ## 3. Directory Structure
@@ -150,6 +159,12 @@ MoveInSync_EV_Fleet/
 │   │                   │   ├── TripAssignment.java
 │   │                   │   ├── TripFeasibilityChecker.java
 │   │                   │   └── VehicleTimeline.java
+│   │                   ├── replan/
+│   │                   │   ├── BatteryDriftEvent.java
+│   │                   │   ├── ChargerFailureEvent.java
+│   │                   │   ├── ReplanningOutcome.java
+│   │                   │   ├── ReplanningResult.java
+│   │                   │   └── ReplanningService.java
 │   │                   ├── time/
 │   │                   │   ├── TariffRate.java
 │   │                   │   ├── TariffSchedule.java

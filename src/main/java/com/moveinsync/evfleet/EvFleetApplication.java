@@ -42,6 +42,7 @@ public class EvFleetApplication {
     }
 
     @Bean
+    @org.springframework.context.annotation.Profile("!test")
     public CommandLineRunner runDemonstration() {
         return args -> {
             System.out.println();

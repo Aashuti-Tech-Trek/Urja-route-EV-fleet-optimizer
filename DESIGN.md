@@ -276,6 +276,9 @@ $$\sum_{s \in \text{Sessions}(H)} \mathbb{I}(s_{\text{start}} \le t < s_{\text{e
 | **Transparent Cost Breakdown** | `CostBreakdown` | `PlanExplanationServiceTest$CostBreakdownTests` | **COMPLETE** |
 | **Plan Quality & Health Metrics** | `PlanQualityReport` | `PlanExplanationServiceTest$PlanQualityReportTests` | **COMPLETE** |
 | **Sound Lower-Bound Analysis** | `LowerBoundResult`, `LowerBoundStatus` | `PlanExplanationServiceTest$LowerBoundAnalysisTests` | **COMPLETE** |
+| **Live Battery Drift Replanning** | `ReplanningService`, `BatteryDriftEvent` | `ReplanningServiceTest$BatteryDriftTests` | **COMPLETE** |
+| **Charger Failure Recovery** | `ReplanningService`, `ChargerFailureEvent` | `ReplanningServiceTest$ChargerFailureTests` | **COMPLETE** |
+| **Replanning Latency SLA (<2s)** | `ReplanningService` | `ReplanningBenchmarkTest` (95ms / 872ms) | **COMPLETE** |
 
 ---
 

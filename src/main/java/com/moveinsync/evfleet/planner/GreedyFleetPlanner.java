@@ -82,6 +82,17 @@ public final class GreedyFleetPlanner implements FleetPlanner {
         return new GreedyFleetPlanner(checker, scheduler, dm, estimator, em, factors, LocalSearchConfig.of(50, 2000));
     }
 
+    public static GreedyFleetPlanner createFastReplanner() {
+        EnergyModel em = new StandardEnergyModel();
+        EnergyFactors factors = EnergyFactors.standard();
+        TravelConfig travelConfig = TravelConfig.defaultConfig();
+        TravelTimeEstimator estimator = new DefaultTravelTimeEstimator(travelConfig);
+        DistanceMatrix dm = new DistanceMatrix(estimator);
+        TripFeasibilityChecker checker = new TripFeasibilityChecker(em, factors, estimator, dm);
+        ChargingScheduler scheduler = new ChargingScheduler(em, factors, new TwoPartChargingCurve(), estimator, dm);
+        return new GreedyFleetPlanner(checker, scheduler, dm, estimator, em, factors, LocalSearchConfig.of(10, 500));
+    }
+
     @Override
     public FleetPlanResult plan(PlanningInput input) {
         Objects.requireNonNull(input, "input must not be null");
