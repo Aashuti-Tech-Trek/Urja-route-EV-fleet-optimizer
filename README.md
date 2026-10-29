@@ -206,6 +206,8 @@ The automated test suite achieves 100% pass rate across 188 unit, integration, a
 [INFO] Tests run: 20, Failures: 0, Errors: 0, Skipped: 0
 [INFO] Running com.moveinsync.evfleet.planner.GreedyFleetPlannerTest
 [INFO] Tests run: 17, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Running com.moveinsync.evfleet.planner.Phase2QualityGateAuditTest
+[INFO] Tests run: 31, Failures: 0, Errors: 0, Skipped: 0
 [INFO] Running com.moveinsync.evfleet.planner.TripFeasibilityCheckerTest
 [INFO] Tests run: 20, Failures: 0, Errors: 0, Skipped: 0
 [INFO] Running com.moveinsync.evfleet.time.TariffScheduleTest
@@ -217,7 +219,7 @@ The automated test suite achieves 100% pass rate across 188 unit, integration, a
 [INFO]
 [INFO] Results:
 [INFO]
-[INFO] Tests run: 188, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Tests run: 219, Failures: 0, Errors: 0, Skipped: 0
 [INFO]
 [INFO] ------------------------------------------------------------------------
 [INFO] BUILD SUCCESS

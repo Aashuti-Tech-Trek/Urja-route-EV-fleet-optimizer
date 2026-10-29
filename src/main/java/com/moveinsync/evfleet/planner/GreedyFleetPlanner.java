@@ -21,6 +21,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -88,19 +89,141 @@ public final class GreedyFleetPlanner implements FleetPlanner {
         Objects.requireNonNull(input, "input must not be null");
         long startNanos = System.nanoTime();
 
-        // 1. Sort trips by urgency and difficulty (scheduledStartTime asc, latestFinish asc, distanceKm desc, tripId asc)
-        List<Trip> sortedTrips = new ArrayList<>(input.getTrips());
-        sortedTrips.sort(Comparator
+        // 1. Initial sort by urgency and difficulty (scheduledStartTime asc, latestFinish asc, distanceKm desc, tripId asc)
+        List<Trip> baselineTrips = new ArrayList<>(input.getTrips());
+        baselineTrips.sort(Comparator
                 .comparing(Trip::getScheduledStartTime)
                 .thenComparing(Trip::getLatestAllowedFinishTime)
                 .thenComparing(Comparator.comparingDouble(Trip::getDistanceKm).reversed())
                 .thenComparing(Trip::getTripId));
 
-        // 2. Sort vehicles deterministically
+        // 2. Build initial greedy plan
+        PlanBuild bestBuild = buildPlan(baselineTrips, input);
+        int totalCandidateEvaluations = bestBuild.candidateEvaluations;
+        int localSearchIterations = 0;
+
+        // 3. Bounded Local Search (explores priority perturbations for unassigned backup trips or cost improvements)
+        if (localSearchConfig.isEnabled() && localSearchConfig.getMaxIterations() > 0 && baselineTrips.size() > 1) {
+            long maxDurationNanos = localSearchConfig.getTimeoutMillis() * 1_000_000L;
+            List<Trip> currentOrder = new ArrayList<>(baselineTrips);
+
+            // Identify backup trip indices
+            for (int i = 0; i < currentOrder.size() && localSearchIterations < localSearchConfig.getMaxIterations(); i++) {
+                if (System.nanoTime() - startNanos >= maxDurationNanos && maxDurationNanos > 0) {
+                    break;
+                }
+
+                Trip currentTrip = currentOrder.get(i);
+                boolean isBackup = bestBuild.assignments.stream()
+                        .anyMatch(a -> a.getTrip().getTripId().equals(currentTrip.getTripId()) && a.isBackupAssignment());
+
+                if (isBackup && i > 0) {
+                    // Try promoting this backup trip ahead of competing earlier trips
+                    for (int targetIdx = 0; targetIdx < i && localSearchIterations < localSearchConfig.getMaxIterations(); targetIdx++) {
+                        if (System.nanoTime() - startNanos >= maxDurationNanos && maxDurationNanos > 0) {
+                            break;
+                        }
+
+                        localSearchIterations++;
+                        List<Trip> candidateOrder = new ArrayList<>(currentOrder);
+                        candidateOrder.remove(i);
+                        candidateOrder.add(targetIdx, currentTrip);
+
+                        PlanBuild candidateBuild = buildPlan(candidateOrder, input);
+                        totalCandidateEvaluations += candidateBuild.candidateEvaluations;
+
+                        // Validate candidate plan independently
+                        FleetPlanResult tempResult = createTempResult(input, candidateBuild, Duration.ZERO);
+                        FleetPlanValidator.ValidationReport validation = validator.validate(tempResult, input);
+
+                        if (validation.isValid()) {
+                            // Lexicographic check: 1. Fewer backup trips; 2. Same backup trips & lower cost
+                            if (candidateBuild.backupCount < bestBuild.backupCount) {
+                                bestBuild = candidateBuild;
+                                currentOrder = candidateOrder;
+                                break;
+                            } else if (candidateBuild.backupCount == bestBuild.backupCount
+                                    && candidateBuild.totalCost.compareTo(bestBuild.totalCost) < 0) {
+                                bestBuild = candidateBuild;
+                                currentOrder = candidateOrder;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Assemble final result
+        Duration duration = Duration.ofNanos(System.nanoTime() - startNanos);
+        String currency = bestBuild.sessions.isEmpty()
+                ? (input.getHubs().isEmpty() ? "INR" : input.getHubs().get(0).getTariffSchedule().getCurrency())
+                : bestBuild.sessions.get(0).getCurrency();
+
+        FleetPlanResult.PlanStatus planStatus = bestBuild.backupCount == 0
+                ? FleetPlanResult.PlanStatus.SUCCESS
+                : (bestBuild.backupCount < baselineTrips.size()
+                ? FleetPlanResult.PlanStatus.PARTIAL_COVERAGE
+                : FleetPlanResult.PlanStatus.NO_FEASIBLE_ASSIGNMENT);
+
+        int backupLowerBound = input.getVehicles().isEmpty() ? baselineTrips.size() : 0;
+        String lowerBoundAssumptions = "Defensible lower bound assumes ideal vehicle range and zero charger queuing.";
+
+        FleetPlanResult unvalidatedResult = new FleetPlanResult(
+                input.getPlanningRunId(),
+                planStatus,
+                bestBuild.assignments,
+                bestBuild.timelines,
+                bestBuild.sessions,
+                bestBuild.backupCount,
+                bestBuild.totalCost,
+                currency,
+                bestBuild.costByHub,
+                duration,
+                HEURISTIC_VERSION,
+                "UNVALIDATED",
+                null
+        );
+
+        FleetPlanValidator.ValidationReport validationReport = validator.validate(unvalidatedResult, input);
+        String validationStatus = validationReport.isValid() ? "VALIDATED" : "VIOLATIONS_DETECTED";
+
+        PlanningQualityReport qualityReport = new PlanningQualityReport(
+                baselineTrips.size(),
+                baselineTrips.size() - bestBuild.backupCount,
+                bestBuild.backupCount,
+                bestBuild.totalCost,
+                currency,
+                bestBuild.sessions.size(),
+                bestBuild.sessionsByHub,
+                duration,
+                localSearchIterations,
+                totalCandidateEvaluations,
+                validationReport.isValid(),
+                backupLowerBound,
+                lowerBoundAssumptions
+        );
+
+        return new FleetPlanResult(
+                input.getPlanningRunId(),
+                planStatus,
+                bestBuild.assignments,
+                bestBuild.timelines,
+                bestBuild.sessions,
+                bestBuild.backupCount,
+                bestBuild.totalCost,
+                currency,
+                bestBuild.costByHub,
+                duration,
+                HEURISTIC_VERSION,
+                validationStatus,
+                qualityReport
+        );
+    }
+
+    private PlanBuild buildPlan(List<Trip> trips, PlanningInput input) {
         List<Vehicle> sortedVehicles = new ArrayList<>(input.getVehicles());
         sortedVehicles.sort(Comparator.comparing(Vehicle::getVehicleId));
 
-        // 3. Initialize timelines and occupancy tracker
         Map<String, VehicleTimeline> timelines = new HashMap<>();
         for (Vehicle v : sortedVehicles) {
             timelines.put(v.getVehicleId(), new VehicleTimeline(
@@ -117,8 +240,7 @@ public final class GreedyFleetPlanner implements FleetPlanner {
         List<ChargingSession> sessions = new ArrayList<>();
         int candidateEvaluations = 0;
 
-        // 4. Greedily assign trips
-        for (Trip trip : sortedTrips) {
+        for (Trip trip : trips) {
             CandidateSelection bestCandidate = null;
             FeasibilityReason primaryRejectionReason = FeasibilityReason.NONE;
             String primaryRejectionDetail = null;
@@ -126,11 +248,8 @@ public final class GreedyFleetPlanner implements FleetPlanner {
             for (Vehicle v : sortedVehicles) {
                 candidateEvaluations++;
                 VehicleTimeline timeline = timelines.get(v.getVehicleId());
-
-                // Build dynamic representation of vehicle at current timeline state
                 Vehicle dynamicVehicle = createDynamicVehicle(v, timeline);
 
-                // Check direct feasibility
                 FeasibilityResult directCheck = feasibilityChecker.check(dynamicVehicle, trip);
                 if (directCheck.isFeasible()) {
                     double deadheadDist = directCheck.getEmptyDriveDistanceKm().orElse(0.0);
@@ -139,7 +258,6 @@ public final class GreedyFleetPlanner implements FleetPlanner {
                         bestCandidate = candidate;
                     }
                 } else {
-                    // Record rejection reason
                     if (primaryRejectionReason == FeasibilityReason.NONE
                             || directCheck.getReason() == FeasibilityReason.INSUFFICIENT_ENERGY_FOR_TRIP
                             || directCheck.getReason() == FeasibilityReason.DEADLINE_INFEASIBLE) {
@@ -147,7 +265,6 @@ public final class GreedyFleetPlanner implements FleetPlanner {
                         primaryRejectionDetail = directCheck.getExplanation();
                     }
 
-                    // If infeasible because of energy, attempt charging opportunity before trip
                     if (isEnergyRelatedFailure(directCheck.getReason()) && !input.getHubs().isEmpty()) {
                         CandidateSelection chargingCandidate = evaluateChargingOpportunity(
                                 dynamicVehicle, timeline, trip, input.getHubs(), occupancyTracker);
@@ -160,13 +277,11 @@ public final class GreedyFleetPlanner implements FleetPlanner {
                 }
             }
 
-            // Assign trip
             if (bestCandidate != null) {
                 Vehicle assignedVehicle = bestCandidate.vehicle;
                 VehicleTimeline timeline = timelines.get(assignedVehicle.getVehicleId());
 
                 if (bestCandidate.chargingPlan != null) {
-                    // Apply charging session
                     ScheduledChargingPlan cp = bestCandidate.chargingPlan;
                     if (cp.getDeadheadEvent().isPresent()) {
                         timeline.addEvent(cp.getDeadheadEvent().get());
@@ -177,7 +292,6 @@ public final class GreedyFleetPlanner implements FleetPlanner {
                     occupancyTracker.recordSession(cs);
                 }
 
-                // Apply empty drive to pickup (if any)
                 Location currentLoc = timeline.getCurrentLocation();
                 Instant currentAvail = timeline.getCurrentAvailableTime();
                 double emptyDist = distanceMatrix.getRoadDistanceKm(currentLoc, trip.getStartLocation());
@@ -197,7 +311,6 @@ public final class GreedyFleetPlanner implements FleetPlanner {
                     currentAvail = arrivalAtPickup;
                 }
 
-                // Apply passenger trip
                 Instant tripStart = currentAvail.isBefore(trip.getScheduledStartTime())
                         ? trip.getScheduledStartTime() : currentAvail;
                 Duration tripDuration = travelEstimator.estimateTravelTime(trip.getStartLocation(), trip.getDestination());
@@ -213,7 +326,6 @@ public final class GreedyFleetPlanner implements FleetPlanner {
 
                 assignments.add(TripAssignment.toEv(trip, assignedVehicle));
             } else {
-                // Assign to backup cab with explicit reason
                 FeasibilityReason reason = primaryRejectionReason != FeasibilityReason.NONE
                         ? primaryRejectionReason : FeasibilityReason.VEHICLE_UNAVAILABLE;
                 String detail = primaryRejectionDetail != null
@@ -222,23 +334,10 @@ public final class GreedyFleetPlanner implements FleetPlanner {
             }
         }
 
-        // 5. Bounded Local Search (preserving best valid plan)
-        int localSearchIterations = 0;
-        if (localSearchConfig.isEnabled() && localSearchConfig.getMaxIterations() > 0) {
-            // Local search preserves current valid assignments, exploring potential reassignments
-            localSearchIterations = Math.min(localSearchConfig.getMaxIterations(), 10);
-        }
-
-        // 6. Assemble result
-        Duration duration = Duration.ofNanos(System.nanoTime() - startNanos);
         int backupCount = (int) assignments.stream().filter(TripAssignment::isBackupAssignment).count();
         BigDecimal totalCost = sessions.stream()
                 .map(ChargingSession::getEstimatedCost)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        String currency = sessions.isEmpty()
-                ? (input.getHubs().isEmpty() ? "INR" : input.getHubs().get(0).getTariffSchedule().getCurrency())
-                : sessions.get(0).getCurrency();
 
         Map<String, BigDecimal> costByHub = new HashMap<>();
         Map<String, Integer> sessionsByHub = new HashMap<>();
@@ -247,67 +346,27 @@ public final class GreedyFleetPlanner implements FleetPlanner {
             sessionsByHub.merge(s.getHubId(), 1, Integer::sum);
         }
 
-        FleetPlanResult.PlanStatus planStatus = backupCount == 0
-                ? FleetPlanResult.PlanStatus.SUCCESS
-                : (backupCount < sortedTrips.size()
-                ? FleetPlanResult.PlanStatus.PARTIAL_COVERAGE
-                : FleetPlanResult.PlanStatus.NO_FEASIBLE_ASSIGNMENT);
+        return new PlanBuild(assignments, timelines, sessions, costByHub, sessionsByHub, candidateEvaluations, backupCount, totalCost);
+    }
 
-        // Calculate defensible lower bound on backup trips:
-        // If vehicles count is 0, all trips must be backup. If trips > 0 and vehicles > 0, trivial lower bound is 0.
-        int backupLowerBound = sortedVehicles.isEmpty() ? sortedTrips.size() : 0;
-        String lowerBoundAssumptions = "Defensible lower bound assumes ideal vehicle range and zero charger queuing.";
-
-        // Pre-create result to run independent validator
-        FleetPlanResult unvalidatedResult = new FleetPlanResult(
+    private FleetPlanResult createTempResult(PlanningInput input, PlanBuild build, Duration duration) {
+        String currency = build.sessions.isEmpty()
+                ? (input.getHubs().isEmpty() ? "INR" : input.getHubs().get(0).getTariffSchedule().getCurrency())
+                : build.sessions.get(0).getCurrency();
+        return new FleetPlanResult(
                 input.getPlanningRunId(),
-                planStatus,
-                assignments,
-                timelines,
-                sessions,
-                backupCount,
-                totalCost,
+                build.backupCount == 0 ? FleetPlanResult.PlanStatus.SUCCESS : FleetPlanResult.PlanStatus.PARTIAL_COVERAGE,
+                build.assignments,
+                build.timelines,
+                build.sessions,
+                build.backupCount,
+                build.totalCost,
                 currency,
-                costByHub,
+                build.costByHub,
                 duration,
                 HEURISTIC_VERSION,
                 "UNVALIDATED",
                 null
-        );
-
-        FleetPlanValidator.ValidationReport validationReport = validator.validate(unvalidatedResult, input);
-        String validationStatus = validationReport.isValid() ? "VALIDATED" : "VIOLATIONS_DETECTED";
-
-        PlanningQualityReport qualityReport = new PlanningQualityReport(
-                sortedTrips.size(),
-                sortedTrips.size() - backupCount,
-                backupCount,
-                totalCost,
-                currency,
-                sessions.size(),
-                sessionsByHub,
-                duration,
-                localSearchIterations,
-                candidateEvaluations,
-                validationReport.isValid(),
-                backupLowerBound,
-                lowerBoundAssumptions
-        );
-
-        return new FleetPlanResult(
-                input.getPlanningRunId(),
-                planStatus,
-                assignments,
-                timelines,
-                sessions,
-                backupCount,
-                totalCost,
-                currency,
-                costByHub,
-                duration,
-                HEURISTIC_VERSION,
-                validationStatus,
-                qualityReport
         );
     }
 
@@ -337,7 +396,6 @@ public final class GreedyFleetPlanner implements FleetPlanner {
         double baseConsumption = vehicle.getBaseConsumptionKwhPerKm();
 
         for (ChargerHub hub : hubs) {
-            // Energy required from hub to trip pickup + trip energy + 15% reserve
             double hubToPickupDist = distanceMatrix.getRoadDistanceKm(hub.getLocation(), trip.getStartLocation());
             double hubToPickupEnergy = hubToPickupDist > 0
                     ? energyModel.calculateEnergyRequired(hubToPickupDist, baseConsumption, energyFactors) : 0.0;
@@ -350,14 +408,13 @@ public final class GreedyFleetPlanner implements FleetPlanner {
             Instant chargingDeadline = trip.getScheduledStartTime().minus(driveToPickup);
 
             if (!chargingDeadline.isAfter(timeline.getCurrentAvailableTime())) {
-                continue; // Cannot even reach hub and charge before departure
+                continue;
             }
 
             ScheduledChargingPlan plan = chargingScheduler.planCharging(
                     vehicle, timeline, hub, targetSoc, chargingDeadline, tracker);
 
             if (plan.isFeasible()) {
-                // Test if trip is feasible with vehicle starting from hub after charging
                 Vehicle chargedVehicle = new Vehicle(
                         vehicle.getVehicleId(),
                         vehicle.getTenantId(),
@@ -381,6 +438,31 @@ public final class GreedyFleetPlanner implements FleetPlanner {
         }
 
         return best;
+    }
+
+    private static final class PlanBuild {
+        private final List<TripAssignment> assignments;
+        private final Map<String, VehicleTimeline> timelines;
+        private final List<ChargingSession> sessions;
+        private final Map<String, BigDecimal> costByHub;
+        private final Map<String, Integer> sessionsByHub;
+        private final int candidateEvaluations;
+        private final int backupCount;
+        private final BigDecimal totalCost;
+
+        private PlanBuild(List<TripAssignment> assignments, Map<String, VehicleTimeline> timelines,
+                          List<ChargingSession> sessions, Map<String, BigDecimal> costByHub,
+                          Map<String, Integer> sessionsByHub, int candidateEvaluations,
+                          int backupCount, BigDecimal totalCost) {
+            this.assignments = assignments;
+            this.timelines = timelines;
+            this.sessions = sessions;
+            this.costByHub = costByHub;
+            this.sessionsByHub = sessionsByHub;
+            this.candidateEvaluations = candidateEvaluations;
+            this.backupCount = backupCount;
+            this.totalCost = totalCost;
+        }
     }
 
     private static final class CandidateSelection implements Comparable<CandidateSelection> {
@@ -409,20 +491,16 @@ public final class GreedyFleetPlanner implements FleetPlanner {
 
         @Override
         public int compareTo(CandidateSelection other) {
-            // 1. Direct EV assignment preferred over charging assignment
             if (this.isCharging != other.isCharging) {
                 return this.isCharging ? 1 : -1;
             }
-            // 2. If both direct, compare deadhead distance
             if (!this.isCharging) {
                 int distCmp = Double.compare(this.deadheadDistanceKm, other.deadheadDistanceKm);
                 if (distCmp != 0) return distCmp;
             } else {
-                // 3. If both charging, compare charging cost
                 int costCmp = Double.compare(this.chargingCost, other.chargingCost);
                 if (costCmp != 0) return costCmp;
             }
-            // 4. Deterministic tie-breaker by vehicle ID
             return this.vehicle.getVehicleId().compareTo(other.vehicle.getVehicleId());
         }
     }

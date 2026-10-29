@@ -140,7 +140,7 @@ public final class TripFeasibilityChecker {
         double batteryCapacity = vehicle.getBatteryCapacityKwh();
         double socBeforeEmptyDrive = vehicle.getStateOfCharge();
 
-        if (!BatterySafetyCalculator.canSustainTrip(batteryCapacity, socBeforeEmptyDrive, emptyDriveEnergyKwh)) {
+        if (emptyDriveDistanceKm > 0.0 && !BatterySafetyCalculator.canSustainTrip(batteryCapacity, socBeforeEmptyDrive, emptyDriveEnergyKwh)) {
             double availableEnergy = BatterySafetyCalculator.calculateAvailableEnergyAboveReserve(
                     batteryCapacity, socBeforeEmptyDrive);
             return FeasibilityResult.infeasible(FeasibilityReason.INSUFFICIENT_ENERGY_FOR_EMPTY_DRIVE,
