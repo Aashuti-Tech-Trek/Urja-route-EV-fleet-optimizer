@@ -6,9 +6,12 @@ $ErrorActionPreference = "Stop"
 $BaseUrl = $args[0]
 if (-not $BaseUrl) { $BaseUrl = "http://localhost:8080" }
 
+$TenantId = "smoke_tenant"
+$ApiKey = "key-operator-$TenantId"
+
 $Headers = @{
     "Content-Type" = "application/json"
-    "Authorization" = "Basic " + [Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes("operator_user:operator_pass"))
+    "X-API-KEY" = $ApiKey
 }
 
 Write-Host "Running UrjaRoute E2E Smoke Test against $BaseUrl..."

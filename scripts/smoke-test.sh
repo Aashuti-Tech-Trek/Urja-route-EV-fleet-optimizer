@@ -3,7 +3,7 @@
 set -euo pipefail
 
 BASE_URL="${1:-http://localhost:8080}"
-AUTH_HEADER="Authorization: Basic $(echo -n 'operator_user:operator_pass' | base64)"
+AUTH_HEADER="X-API-KEY: key-operator-smoke_tenant"
 JSON_HEADER="Content-Type: application/json"
 
 echo "Running UrjaRoute E2E Smoke Test against $BASE_URL..."
