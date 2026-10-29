@@ -244,49 +244,13 @@ mvn test -Dtest="PlanValidatorTest,PlanValidatorBenchmarkTest"
 
 ## 5. Test Suite & Verification Results
 
-The automated test suite achieves 100% pass rate across 241 unit, integration, validation, and benchmark tests:
+The automated test suite achieves 100% pass rate across 260 unit, integration, validation, replanning, and API tests:
 
 ```
-[INFO] -------------------------------------------------------
-[INFO]  T E S T S
-[INFO] -------------------------------------------------------
-[INFO] Running com.moveinsync.evfleet.domain.ChargerHubTest
-[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0
-[INFO] Running com.moveinsync.evfleet.domain.ChargingSessionTest
-[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0
-[INFO] Running com.moveinsync.evfleet.domain.TripTest
-[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0
-[INFO] Running com.moveinsync.evfleet.domain.VehicleTest
-[INFO] Tests run: 14, Failures: 0, Errors: 0, Skipped: 0
-[INFO] Running com.moveinsync.evfleet.energy.BatterySafetyCalculatorTest
-[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0
-[INFO] Running com.moveinsync.evfleet.energy.StandardEnergyModelTest
-[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0
-[INFO] Running com.moveinsync.evfleet.EvFleetApplicationTests
-[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0
-[INFO] Running com.moveinsync.evfleet.location.LocationTest
-[INFO] Tests run: 20, Failures: 0, Errors: 0, Skipped: 0
-[INFO] Running com.moveinsync.evfleet.planner.GreedyFleetPlannerTest
-[INFO] Tests run: 17, Failures: 0, Errors: 0, Skipped: 0
-[INFO] Running com.moveinsync.evfleet.planner.Phase2QualityGateAuditTest
-[INFO] Tests run: 31, Failures: 0, Errors: 0, Skipped: 0
-[INFO] Running com.moveinsync.evfleet.planner.TripFeasibilityCheckerTest
-[INFO] Tests run: 20, Failures: 0, Errors: 0, Skipped: 0
-[INFO] Running com.moveinsync.evfleet.time.TariffScheduleTest
-[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0
-[INFO] Running com.moveinsync.evfleet.time.TimeWindowTest
-[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0
-[INFO] Running com.moveinsync.evfleet.travel.TravelTests
-[INFO] Tests run: 35, Failures: 0, Errors: 0, Skipped: 0
-[INFO] Running com.moveinsync.evfleet.validator.PlanValidatorBenchmarkTest
-[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0
-[INFO] Running com.moveinsync.evfleet.validator.PlanValidatorTest
-[INFO] Tests run: 19, Failures: 0, Errors: 0, Skipped: 0
-[INFO]
 [INFO] Results:
-[INFO]
-[INFO] Tests run: 241, Failures: 0, Errors: 0, Skipped: 0
-[INFO]
+[INFO] 
+[INFO] Tests run: 260, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
 [INFO] ------------------------------------------------------------------------
 [INFO] BUILD SUCCESS
 [INFO] ------------------------------------------------------------------------
@@ -296,9 +260,36 @@ The automated test suite achieves 100% pass rate across 241 unit, integration, v
 
 ## 6. Benchmarking & Scalability
 
-The validator performance harness (`PlanValidatorBenchmarkTest`) guarantees sub-second validation throughput:
-- **Small Scale:** 10 vehicles, 25 trips, 3 hubs $\rightarrow$ **< 1 ms** (55 checks).
-- **Medium Scale:** 30 vehicles, 100 trips, 5 hubs $\rightarrow$ **< 1 ms** (311 checks).
-- **Target Scale:** 100 vehicles, 500 trips, 20 hubs $\rightarrow$ **< 1 ms** (2,173 checks, certified 0 violations).
+- **Validator Performance:**
+  - Small Scale (10 EVs, 25 trips): **< 1 ms** (55 checks).
+  - Target Scale (100 EVs, 500 trips, 20 hubs): **< 1 ms** (2,173 checks, certified 0 violations).
+- **Replanning SLA Performance:**
+  - Small Replanning (10 EVs, 50 trips): **80 ms** (< 2.0s SLA).
+  - Medium Replanning (50 EVs, 200 trips): **449 ms** (< 2.0s SLA).
+
+---
+
+## 7. REST APIs & PostgreSQL Service (Phase 6)
+
+### Running PostgreSQL 16 via Docker:
+```bash
+docker compose up -d
+```
+
+### OpenAPI / Swagger UI:
+Once the service is started with `mvn spring-boot:run`, interactive documentation is available at:
+`http://localhost:8080/swagger-ui.html`
+
+### Core API Endpoints:
+- `POST /api/v1/vehicles` — Register EV with battery capacity, SoC, efficiency, and available location.
+- `GET /api/v1/vehicles` — Query all fleet vehicles for tenant.
+- `POST /api/v1/trips` — Ingest commute trip demand with pickup window and latest deadline.
+- `GET /api/v1/trips` — List trip demands for tenant.
+- `POST /api/v1/plans/propose` — Run optimization and independent validator to return a candidate plan proposal.
+- `POST /api/v1/plans/{proposalId}/accept` — Atomically accept proposal with optimistic version checking (`expectedCurrentVersion`) and `Idempotency-Key` deduplication.
+- `GET /api/v1/plans/versions` — Query versioned history of accepted fleet plans.
+- `POST /api/v1/replanning/battery-drift` — Trigger bounded replanning upon observed SoC telemetry drift under 2.0s SLA.
+- `POST /api/v1/replanning/charger-failure` — Trigger rerouting and replanning upon unexpected charger hub outage under 2.0s SLA.
 
 For comprehensive architecture diagrams, reason-code specifications, and mathematical formulations, refer to [DESIGN.md](DESIGN.md).
+

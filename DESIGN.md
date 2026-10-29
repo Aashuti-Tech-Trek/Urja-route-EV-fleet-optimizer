@@ -278,12 +278,35 @@ $$\sum_{s \in \text{Sessions}(H)} \mathbb{I}(s_{\text{start}} \le t < s_{\text{e
 | **Sound Lower-Bound Analysis** | `LowerBoundResult`, `LowerBoundStatus` | `PlanExplanationServiceTest$LowerBoundAnalysisTests` | **COMPLETE** |
 | **Live Battery Drift Replanning** | `ReplanningService`, `BatteryDriftEvent` | `ReplanningServiceTest$BatteryDriftTests` | **COMPLETE** |
 | **Charger Failure Recovery** | `ReplanningService`, `ChargerFailureEvent` | `ReplanningServiceTest$ChargerFailureTests` | **COMPLETE** |
-| **Replanning Latency SLA (<2s)** | `ReplanningService` | `ReplanningBenchmarkTest` (95ms / 872ms) | **COMPLETE** |
+| **Replanning Latency SLA (<2s)** | `ReplanningService` | `ReplanningBenchmarkTest` (80ms / 449ms) | **COMPLETE** |
+| **PostgreSQL 16 Schema & Flyway** | `V1__initial_schema.sql`, `docker-compose.yml` | Flyway Migration on PostgreSQL 16 | **COMPLETE** |
+| **Multi-Tenant Fleet REST APIs** | `FleetController`, `TripController` | `PlanningIntegrationTest#testEndToEndPlanningFlow` | **COMPLETE** |
+| **Atomic Plan Acceptance & CAS** | `PlanningController`, `FleetPersistenceService` | `PlanningIntegrationTest#testVersionConflictReturns409` | **COMPLETE** |
+| **Idempotency Deduplication** | `IdempotencyRecordRepository` | `PlanningIntegrationTest#testIdempotentAcceptance` | **COMPLETE** |
 
 ---
 
-## 11. Known Limitations & Roadmap
+## 11. Phase 6 Architecture: Multi-Tenant REST APIs & Optimistic Plan Versioning
+
+### A. Persistence & Multi-Tenancy
+- **Tenant Isolation:** All entities (`TenantEntity`, `VehicleEntity`, `TripEntity`, `ChargerHubEntity`, `PlanProposalEntity`, `PlanVersionEntity`, `TripAssignmentEntity`, `ChargingSessionEntity`, `AuditRecordEntity`, `IdempotencyRecordEntity`) carry strict `tenant_id` foreign keys and indexed constraints.
+- **Flyway Migrations:** `V1__initial_schema.sql` establishes production-ready relational schemas with referential integrity and cascading deletions.
+- **Docker Compose:** Fully reproducible PostgreSQL 16 Alpine container with readiness health check (`pg_isready`).
+
+### B. Optimistic Locking & Compare-and-Set (CAS) Acceptance
+- Every candidate plan begins as a `PlanProposal`.
+- Acceptance endpoint `POST /api/v1/plans/{proposalId}/accept` requires an `expectedCurrentVersion` field.
+- If the current active version in the database diverges from `expectedCurrentVersion`, an RFC 7807 `409 Conflict` `ProblemDetail` is returned, preventing concurrent overwrite hazards.
+- Accepted proposals atomically transition to `PlanVersionEntity` with status `ACCEPTED`, marking the former version as `SUPERSEDED`.
+
+### C. Idempotency Key De-duplication
+- Mutation requests support the `Idempotency-Key` HTTP header.
+- Repeated submissions return the exact original JSON response and HTTP status code from `IdempotencyRecordEntity` without repeating optimization or database mutations.
+
+---
+
+## 12. Known Limitations & Roadmap
 
 1. **Greedy Horizon:** The greedy heuristic assigns trips sequentially ordered by urgency. Complex multi-trip chaining across dense shifts will be further optimized using metaheuristics / ALNS (Adaptive Large Neighborhood Search).
 2. **Dynamic Routing Graphs:** The travel-time estimator currently uses an urban road factor model ($1.3 \times$ Haversine). Future extensions can plug in live OpenStreetMap / OSRM matrix providers via `TravelTimeEstimator`.
-3. **Real-time Replanning:** With the independent validator executing in $< 1\text{ ms}$, real-time event-driven replanning (<2s SLA) upon vehicle telemetry drops or hub outages is natively enabled.
+3. **Distributed Lock Coordination:** Current optimistic version checking provides atomic consistency at the tenant level. Future clustering can integrate distributed Redis / database advisory locks if sub-millisecond contention peaks occur.
