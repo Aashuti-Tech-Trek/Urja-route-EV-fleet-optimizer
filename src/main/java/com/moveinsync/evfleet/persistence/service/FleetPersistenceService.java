@@ -2,6 +2,8 @@ package com.moveinsync.evfleet.persistence.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.moveinsync.evfleet.api.dto.HubUtilizationResponse;
+import com.moveinsync.evfleet.api.dto.OverviewResponse;
 import com.moveinsync.evfleet.api.dto.PlanProposalResponse;
 import com.moveinsync.evfleet.api.dto.PlanVersionResponse;
 import com.moveinsync.evfleet.domain.*;
@@ -18,6 +20,8 @@ import com.moveinsync.evfleet.validator.PlanValidator;
 import com.moveinsync.evfleet.validator.ValidationReport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -111,11 +115,104 @@ public class FleetPersistenceService {
     public ChargerHubEntity registerHub(String tenantId, ChargerHubEntity hub) {
         ensureTenant(tenantId);
         hub.setTenantId(tenantId);
-        return chargerHubRepository.save(hub);
+        ChargerHubEntity saved = chargerHubRepository.save(hub);
+        auditRecordRepository.save(new AuditRecordEntity(
+            UUID.randomUUID().toString(), tenantId, SecurityUtils.getAuthenticatedActor(),
+            "REGISTER_HUB", "HUB", saved.getId(), UUID.randomUUID().toString(), "Charger hub registered"
+        ));
+        return saved;
     }
 
     public List<ChargerHubEntity> getHubs(String tenantId) {
         return chargerHubRepository.findByTenantId(tenantId);
+    }
+
+    public Page<ChargerHubEntity> getHubs(String tenantId, Pageable pageable) {
+        return chargerHubRepository.findByTenantId(tenantId, pageable);
+    }
+
+    public Optional<ChargerHubEntity> getHub(String tenantId, String hubId) {
+        return chargerHubRepository.findByIdAndTenantId(hubId, tenantId);
+    }
+
+    @Transactional
+    public ChargerHubEntity updateHub(String tenantId, String hubId, ChargerHubEntity updatedConfig) {
+        ensureTenant(tenantId);
+        ChargerHubEntity existing = chargerHubRepository.findByIdAndTenantId(hubId, tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Hub not found: " + hubId));
+
+        existing.setName(updatedConfig.getName());
+        existing.setLocationId(updatedConfig.getLocationId());
+        existing.setTotalChargers(updatedConfig.getTotalChargers());
+        existing.setChargerPowerKw(updatedConfig.getChargerPowerKw());
+        existing.setTariffRate(updatedConfig.getTariffRate());
+        existing.setStatus(updatedConfig.getStatus());
+        existing.setLatitude(updatedConfig.getLatitude());
+        existing.setLongitude(updatedConfig.getLongitude());
+
+        ChargerHubEntity saved = chargerHubRepository.save(existing);
+        auditRecordRepository.save(new AuditRecordEntity(
+            UUID.randomUUID().toString(), tenantId, SecurityUtils.getAuthenticatedActor(),
+            "UPDATE_HUB", "HUB", saved.getId(), UUID.randomUUID().toString(),
+            "Updated hub configuration, status=" + saved.getStatus()
+        ));
+        return saved;
+    }
+
+    @Transactional
+    public ChargerHubEntity setHubStatus(String tenantId, String hubId, String status) {
+        ensureTenant(tenantId);
+        ChargerHubEntity hub = chargerHubRepository.findByIdAndTenantId(hubId, tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Hub not found: " + hubId));
+        hub.setStatus(status);
+        ChargerHubEntity saved = chargerHubRepository.save(hub);
+        auditRecordRepository.save(new AuditRecordEntity(
+            UUID.randomUUID().toString(), tenantId, SecurityUtils.getAuthenticatedActor(),
+            "SET_HUB_STATUS", "HUB", saved.getId(), UUID.randomUUID().toString(),
+            "Set hub status to " + status
+        ));
+        return saved;
+    }
+
+    public HubUtilizationResponse getHubUtilization(String tenantId, String hubId) {
+        ChargerHubEntity hub = chargerHubRepository.findByIdAndTenantId(hubId, tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Hub not found: " + hubId));
+
+        int totalChargers = hub.getTotalChargers();
+        boolean isOffline = "OFFLINE".equalsIgnoreCase(hub.getStatus());
+        int offlineChargers = isOffline ? totalChargers : 0;
+
+        // Query active plan charging sessions for this hub
+        List<PlanProposalResponse.ChargingSessionDto> sessions = new ArrayList<>();
+        int occupied = 0;
+        Instant now = Instant.now();
+
+        Optional<PlanVersionEntity> activeVersionOpt = planVersionRepository.findByTenantIdAndStatus(tenantId, "ACCEPTED");
+        if (activeVersionOpt.isPresent()) {
+            String proposalId = activeVersionOpt.get().getProposalId();
+            List<ChargingSessionEntity> csEntities = chargingSessionRepository.findByPlanProposalIdAndHubIdOrderByStartTimeAsc(proposalId, hubId);
+            for (ChargingSessionEntity cs : csEntities) {
+                sessions.add(new PlanProposalResponse.ChargingSessionDto(
+                    cs.getVehicleId(), cs.getHubId(), cs.getStartTime(), cs.getEndTime(),
+                    cs.getEnergyAddedKwh(), cs.getCost()
+                ));
+                if (!now.isBefore(cs.getStartTime()) && now.isBefore(cs.getEndTime())) {
+                    occupied++;
+                }
+            }
+        }
+
+        int available = isOffline ? 0 : Math.max(0, totalChargers - occupied);
+        double utilization = totalChargers > 0 ? (double) occupied / totalChargers : 0.0;
+
+        return new HubUtilizationResponse(hubId, totalChargers, available, occupied, offlineChargers, utilization, sessions);
+    }
+
+    public List<AuditRecordEntity> getRecoveryEvents(String tenantId) {
+        return auditRecordRepository.findByTenantIdOrderByTimestampDesc(tenantId).stream()
+                .filter(a -> a.getAction().contains("RECOVERY") || a.getAction().contains("REPLAN") || a.getAction().contains("DRIFT") || a.getAction().contains("OUTAGE"))
+                .limit(20)
+                .toList();
     }
 
     @Transactional
@@ -167,20 +264,22 @@ public class FleetPersistenceService {
             )
         ).toList();
 
-        TariffSchedule schedule = new TariffSchedule(
-            ZoneId.of("Asia/Kolkata"), "INR", List.of(), TariffRate.of(8.50, "INR")
-        );
-
-        List<ChargerHub> hubs = hEntities.stream().map(he ->
-            new ChargerHub(
-                he.getId(),
-                tenantId,
-                new Location(12.9915, 77.5583),
-                he.getTotalChargers(),
-                50.0,
-                schedule
-            )
-        ).toList();
+        // Convert hubs respecting status (failed/offline hubs excluded from planning)
+        List<ChargerHub> hubs = hEntities.stream()
+            .filter(he -> !"OFFLINE".equalsIgnoreCase(he.getStatus()))
+            .map(he -> {
+                TariffSchedule schedule = new TariffSchedule(
+                    ZoneId.of("Asia/Kolkata"), "INR", List.of(), TariffRate.of(he.getTariffRate(), "INR")
+                );
+                return new ChargerHub(
+                    he.getId(),
+                    tenantId,
+                    new Location(he.getLatitude(), he.getLongitude()),
+                    he.getTotalChargers(),
+                    he.getChargerPowerKw(),
+                    schedule
+                );
+            }).toList();
 
         PlanningInput input = new PlanningInput("RUN-" + UUID.randomUUID(), vehicles, trips, hubs);
         GreedyFleetPlanner planner = GreedyFleetPlanner.createDefault();
@@ -356,13 +455,32 @@ public class FleetPersistenceService {
         idempotencyRecordRepository.save(new IdempotencyRecordEntity(key, tenantId, requestFingerprint, payload, status));
     }
 
-    public com.moveinsync.evfleet.api.dto.OverviewResponse getOverview(String tenantId) {
-        int vehicleCount = vehicleRepository.findByTenantId(tenantId).size();
+    @Transactional
+    public void recordAuditEvent(String tenantId, String action, String entityType, String entityId, String details) {
+        ensureTenant(tenantId);
+        auditRecordRepository.save(new AuditRecordEntity(
+            UUID.randomUUID().toString(), tenantId, SecurityUtils.getAuthenticatedActor(),
+            action, entityType, entityId, UUID.randomUUID().toString(), details
+        ));
+    }
+
+    public OverviewResponse getOverview(String tenantId) {
+        List<VehicleEntity> vehicles = vehicleRepository.findByTenantId(tenantId);
+        int vehicleCount = vehicles.size();
+        int availableVehicles = vehicleCount; // default all available
+
         List<TripEntity> trips = tripRepository.findByTenantId(tenantId);
         int tripCount = trips.size();
         List<ChargerHubEntity> hubs = chargerHubRepository.findByTenantId(tenantId);
         int hubCount = hubs.size();
         int totalChargers = hubs.stream().mapToInt(ChargerHubEntity::getTotalChargers).sum();
+
+        int offlineChargers = 0;
+        for (ChargerHubEntity h : hubs) {
+            if ("OFFLINE".equalsIgnoreCase(h.getStatus())) {
+                offlineChargers += h.getTotalChargers();
+            }
+        }
 
         Optional<PlanVersionEntity> activeVersionOpt = planVersionRepository.findByTenantIdAndStatus(tenantId, "ACCEPTED");
         long currentVersion = activeVersionOpt.map(PlanVersionEntity::getVersionNumber).orElse(0L);
@@ -371,6 +489,8 @@ public class FleetPersistenceService {
         double latestCost = 0.0;
         int evAssigned = 0;
         int backupTrips = 0;
+        int occupiedChargers = 0;
+        Instant now = Instant.now();
 
         if (activeVersionOpt.isPresent()) {
             String proposalId = activeVersionOpt.get().getProposalId();
@@ -388,19 +508,45 @@ public class FleetPersistenceService {
                         evAssigned++;
                     }
                 }
+
+                List<ChargingSessionEntity> sessions = chargingSessionRepository.findByPlanProposalIdOrderByStartTimeAsc(proposalId);
+                for (ChargingSessionEntity cs : sessions) {
+                    if (!now.isBefore(cs.getStartTime()) && now.isBefore(cs.getEndTime())) {
+                        occupiedChargers++;
+                    }
+                }
             }
         }
 
-        return new com.moveinsync.evfleet.api.dto.OverviewResponse(
+        int availableChargers = Math.max(0, totalChargers - offlineChargers - occupiedChargers);
+        double utilization = totalChargers > 0 ? (double) occupiedChargers / totalChargers : 0.0;
+        int pendingTrips = Math.max(0, tripCount - evAssigned - backupTrips);
+
+        // Fetch recent recovery audit events
+        List<String> recentRecovery = auditRecordRepository.findByTenantIdOrderByTimestampDesc(tenantId).stream()
+                .filter(a -> a.getAction().contains("RECOVERY") || a.getAction().contains("REPLAN") || a.getAction().contains("DRIFT") || a.getAction().contains("OUTAGE"))
+                .limit(5)
+                .map(a -> String.format("[%s] %s on %s %s: %s",
+                        a.getTimestamp(), a.getAction(), a.getEntityType(), a.getEntityId(), a.getDetails()))
+                .toList();
+
+        return new OverviewResponse(
             vehicleCount,
+            availableVehicles,
             tripCount,
+            pendingTrips,
             hubCount,
             totalChargers,
+            availableChargers,
+            occupiedChargers,
+            offlineChargers,
             currentVersion,
             serviceRate,
             latestCost,
             evAssigned,
-            backupTrips
+            backupTrips,
+            utilization,
+            recentRecovery
         );
     }
 }

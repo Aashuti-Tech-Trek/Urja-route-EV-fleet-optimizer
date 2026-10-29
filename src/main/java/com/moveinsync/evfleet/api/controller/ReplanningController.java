@@ -45,6 +45,18 @@ public class ReplanningController {
             @Valid @RequestBody BatteryDriftRequest request) {
 
         String tenantId = SecurityUtils.getAuthenticatedTenantId();
+
+        // 1. Validate vehicle ownership & existence for tenant
+        List<VehicleEntity> vehicles = fleetService.getVehicles(tenantId);
+        boolean vehicleExists = vehicles.stream().anyMatch(v -> v.getId().equals(request.vehicleId()));
+        if (!vehicleExists) {
+            fleetService.recordAuditEvent(
+                tenantId, "BATTERY_DRIFT_REJECTED", "VEHICLE", request.vehicleId(),
+                "Vehicle does not belong to tenant " + tenantId + " or not found"
+            );
+            throw new IllegalArgumentException("Vehicle " + request.vehicleId() + " does not belong to tenant " + tenantId);
+        }
+
         PlanningInput input = buildDefaultInput(tenantId);
         FleetPlanResult currentPlan = GreedyFleetPlanner.createFastReplanner().plan(input);
 
@@ -61,6 +73,24 @@ public class ReplanningController {
             event
         );
 
+        // 2. Persist updated observed battery state to vehicle entity
+        vehicles.stream()
+                .filter(v -> v.getId().equals(request.vehicleId()))
+                .findFirst()
+                .ifPresent(v -> {
+                    v.setCurrentSoc(request.observedSoc());
+                    fleetService.registerVehicle(tenantId, v);
+                });
+
+        // 3. Record auditable recovery event
+        fleetService.recordAuditEvent(
+            tenantId, "BATTERY_DRIFT_RECOVERY", "VEHICLE", request.vehicleId(),
+            String.format("Observed SoC=%.2f, outcome=%s, durationMs=%d, valid=%b",
+                    request.observedSoc(), result.getOutcome().name(),
+                    result.getElapsedDuration().toMillis(),
+                    result.getValidationReport().map(r -> r.isValid()).orElse(false))
+        );
+
         return ResponseEntity.ok(toApiResponse(result));
     }
 
@@ -70,8 +100,24 @@ public class ReplanningController {
             @Valid @RequestBody ChargerFailureRequest request) {
 
         String tenantId = SecurityUtils.getAuthenticatedTenantId();
-        PlanningInput input = buildDefaultInput(tenantId);
-        FleetPlanResult currentPlan = GreedyFleetPlanner.createFastReplanner().plan(input);
+
+        // 1. Validate hub ownership & existence for tenant
+        List<ChargerHubEntity> hubs = fleetService.getHubs(tenantId);
+        boolean hubExists = hubs.stream().anyMatch(h -> h.getId().equals(request.hubId()));
+        if (!hubExists) {
+            fleetService.recordAuditEvent(
+                tenantId, "CHARGER_FAILURE_REJECTED", "HUB", request.hubId(),
+                "Charger hub does not belong to tenant " + tenantId + " or not found"
+            );
+            throw new IllegalArgumentException("Charger hub " + request.hubId() + " does not belong to tenant " + tenantId);
+        }
+
+        // Build baseline plan before marking offline so current plan reflects the schedule before the failure
+        PlanningInput inputBeforeFailure = buildDefaultInput(tenantId, false);
+        FleetPlanResult currentPlan = GreedyFleetPlanner.createFastReplanner().plan(inputBeforeFailure);
+
+        // Mark hub status as OFFLINE
+        fleetService.setHubStatus(tenantId, request.hubId(), "OFFLINE");
 
         ChargerFailureEvent event = new ChargerFailureEvent(
             UUID.randomUUID().toString(),
@@ -81,12 +127,52 @@ public class ReplanningController {
         );
 
         ReplanningResult result = replanningService.handleChargerFailure(
-            input,
+            inputBeforeFailure,
             currentPlan,
             event
         );
 
+        // Record auditable recovery event
+        fleetService.recordAuditEvent(
+            tenantId, "CHARGER_FAILURE_RECOVERY", "HUB", request.hubId(),
+            String.format("Outage from %s to %s, outcome=%s, durationMs=%d, valid=%b",
+                    request.outageStart(), request.estimatedRestoration(),
+                    result.getOutcome().name(),
+                    result.getElapsedDuration().toMillis(),
+                    result.getValidationReport().map(r -> r.isValid()).orElse(false))
+        );
+
         return ResponseEntity.ok(toApiResponse(result));
+    }
+
+    @PostMapping("/charger-restore/{hubId}")
+    @Operation(summary = "Explicitly restore an offline charger hub back to OPERATIONAL")
+    public ResponseEntity<ReplanningApiResponse> restoreCharger(@PathVariable String hubId) {
+        String tenantId = SecurityUtils.getAuthenticatedTenantId();
+
+        ChargerHubEntity hub = fleetService.getHub(tenantId, hubId)
+                .orElseThrow(() -> new IllegalArgumentException("Charger hub " + hubId + " does not belong to tenant " + tenantId));
+
+        fleetService.setHubStatus(tenantId, hubId, "OPERATIONAL");
+
+        fleetService.recordAuditEvent(
+            tenantId, "CHARGER_RESTORED", "HUB", hubId,
+            "Charger hub restored to OPERATIONAL status"
+        );
+
+        PlanningInput input = buildDefaultInput(tenantId);
+        FleetPlanResult restoredPlan = GreedyFleetPlanner.createFastReplanner().plan(input);
+
+        return ResponseEntity.ok(new ReplanningApiResponse(
+            "SUCCESS",
+            UUID.randomUUID().toString(),
+            restoredPlan.getTotalChargingCost().doubleValue(),
+            0.0,
+            List.of("restoredHub=" + hubId),
+            List.of("preservedCount=" + restoredPlan.getTripAssignments().size()),
+            0L,
+            true
+        ));
     }
 
     private ReplanningApiResponse toApiResponse(ReplanningResult result) {
@@ -108,6 +194,10 @@ public class ReplanningController {
     }
 
     private PlanningInput buildDefaultInput(String tenantId) {
+        return buildDefaultInput(tenantId, true);
+    }
+
+    private PlanningInput buildDefaultInput(String tenantId, boolean filterOffline) {
         List<VehicleEntity> vEntities = fleetService.getVehicles(tenantId);
         List<TripEntity> tEntities = fleetService.getTrips(tenantId);
         List<ChargerHubEntity> hEntities = fleetService.getHubs(tenantId);
@@ -136,20 +226,21 @@ public class ReplanningController {
             )
         ).toList();
 
-        TariffSchedule schedule = new TariffSchedule(
-            ZoneId.of("Asia/Kolkata"), "INR", List.of(), TariffRate.of(8.50, "INR")
-        );
-
-        List<ChargerHub> hubs = hEntities.stream().map(he ->
-            new ChargerHub(
-                he.getId(),
-                tenantId,
-                new Location(12.9915, 77.5583),
-                he.getTotalChargers(),
-                50.0,
-                schedule
-            )
-        ).toList();
+        List<ChargerHub> hubs = hEntities.stream()
+            .filter(he -> !filterOffline || !"OFFLINE".equalsIgnoreCase(he.getStatus()))
+            .map(he -> {
+                TariffSchedule schedule = new TariffSchedule(
+                    ZoneId.of("Asia/Kolkata"), "INR", List.of(), TariffRate.of(he.getTariffRate(), "INR")
+                );
+                return new ChargerHub(
+                    he.getId(),
+                    tenantId,
+                    new Location(he.getLatitude(), he.getLongitude()),
+                    he.getTotalChargers(),
+                    he.getChargerPowerKw(),
+                    schedule
+                );
+            }).toList();
 
         return new PlanningInput("RUN-" + UUID.randomUUID(), vehicles, trips, hubs);
     }

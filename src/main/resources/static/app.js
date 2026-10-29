@@ -278,6 +278,39 @@
     $("register-trip-form").addEventListener("submit", registerTripSubmit);
   }
 
+  async function registerHubSubmit(e) {
+    e.preventDefault();
+    const btn = $("submit-hub-btn");
+    btn.disabled = true;
+    try {
+      const payload = {
+        id: $("h-id").value.trim(),
+        name: $("h-name").value.trim(),
+        locationId: $("h-loc").value.trim(),
+        totalChargers: parseInt($("h-chargers").value, 10),
+        chargerPowerKw: parseFloat($("h-power").value),
+        tariffRate: parseFloat($("h-tariff").value),
+        status: "OPERATIONAL"
+      };
+      await api("/api/v1/hubs", { method: "POST", body: JSON.stringify(payload) });
+      toast(`Hub ${payload.name} registered.`);
+      $("register-hub-dialog").close();
+      $("register-hub-form").reset();
+      await refresh();
+    } catch(err) {
+      toast("Hub registration failed: " + err.message, true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  if ($("open-register-hub-button")) {
+    $("open-register-hub-button").addEventListener("click", () => $("register-hub-dialog").showModal());
+  }
+  if ($("register-hub-form")) {
+    $("register-hub-form").addEventListener("submit", registerHubSubmit);
+  }
+
   document.querySelectorAll(".nav-item").forEach(a=>a.addEventListener("click",()=>{document.querySelectorAll(".nav-item").forEach(n=>n.classList.remove("active"));a.classList.add("active");$("breadcrumb-current").textContent=a.textContent.trim().replace(/\s+/g," ");}));
   $("today-label").textContent=new Intl.DateTimeFormat("en-IN",{weekday:"short",day:"2-digit",month:"short",timeZone:"Asia/Kolkata"}).format(new Date()).toUpperCase()+" · IST";
   setDemoState();

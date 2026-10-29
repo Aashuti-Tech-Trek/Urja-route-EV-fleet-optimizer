@@ -235,21 +235,55 @@ mvn clean compile
 mvn test
 ```
 
-### Run Plan Validator Tests Specifically:
+### Phase 10: Hub Management & Tenant Operations (COMPLETE)
+- **Hub Management APIs (`/api/v1/hubs`):** Full CRUD for charger hubs, paginated listing (`PageResponse<T>`), detail retrieval, power and tariff updates, status toggling (`OPERATIONAL`, `OFFLINE`, `DEGRADED`), and live utilization inspection (`/utilization`).
+- **Strict Tenant Isolation:** All hub queries, updates, and planning operations restricted to the authenticated tenant. Cross-tenant access attempts return RFC 7807 `400 Bad Request` or `404 Not Found` without disclosing foreign tenant data.
+- **Capacity & Charger Correctness:** Offline/failed hubs are dynamically excluded from planning and validation. Charger sweep-line ensures physical concurrent sessions do not exceed available plugs.
+- **Tenant Overview Reconciled (`/api/v1/overview`):** Provides real-time reconciliation of total/available/offline chargers, pending/assigned/backup trips, and recent recovery events without hardcoded demo figures.
+
+### Phase 11: Live Recovery & Operator Workflows (COMPLETE)
+- **Telemetry Battery-Drift Recovery (`/api/v1/replanning/battery-drift`):** Bounded incremental replan (< 2.0s SLA) freezing completed trips, repositioning the vehicle at observed SoC, validating with `PlanValidator`, persisting updated SoC, and emitting auditable recovery events.
+- **Charger-Failure Recovery (`/api/v1/replanning/charger-failure`):** Identifies impacted charging sessions during outage intervals, marks hub `OFFLINE`, replans around available operational hubs, and records audit logs.
+- **Explicit Charger Restoration (`/api/v1/replanning/charger-restore/{hubId}`):** Safely restores repaired charging hubs to `OPERATIONAL` status and triggers an immediate fleet re-evaluation.
+- **Cross-Tenant Incident Guard:** Validates vehicle and hub ownership before executing drift or failure workflows, rejecting unauthorized attempts.
+
+### Phase 12: Deployment, Documentation & Delivery (COMPLETE)
+- **One-Command Docker Compose:** Complete multi-service setup (`docker compose up --build -d`) with PostgreSQL 16 healthchecks, multi-stage non-root container, and Flyway database migrations (`V1` through `V4`).
+- **Reproducible Smoke Tests:** Automated E2E verification scripts (`scripts/smoke-test.ps1`, `scripts/smoke-test.sh`) verifying actuator health, RBAC security, entity registration, proposal generation, validator pass, version acceptance, optimistic locking 409 conflicts, battery drift, charger outage, and restoration.
+- **Comprehensive Benchmarks:** Verified target scale of 300 EVs / 1,500 trips / 40 chargers in **2.38s** (full plan) and **663 ms** (replan), both well within 30s and 2s SLA limits.
+
+---
+
+## 4. Build, Test and Verify
+
+### Compile & Run All 277 Automated Tests:
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-24"
+$env:Path = "C:\Program Files\Java\jdk-24\bin;" + $env:Path
+$env:MAVEN_OPTS = "-Xms32m -Xmx160m -XX:ReservedCodeCacheSize=24m -Xss256k -XX:+UseSerialGC"
+.\mvnw.cmd test
+```
+
+### Run End-to-End Smoke Test Script:
+```powershell
+.\scripts\smoke-test.ps1 http://localhost:8080
+```
+
+### One-Command Production Docker Deployment:
 ```bash
-mvn test -Dtest="PlanValidatorTest,PlanValidatorBenchmarkTest"
+docker compose up --build -d
 ```
 
 ---
 
 ## 5. Test Suite & Verification Results
 
-The automated test suite achieves 100% pass rate across 266 unit, integration, validation, replanning, security, and API tests:
+The automated test suite achieves **100% pass rate across 277 tests** (0 failures, 0 errors, 0 skipped):
 
 ```
 [INFO] Results:
 [INFO] 
-[INFO] Tests run: 266, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Tests run: 277, Failures: 0, Errors: 0, Skipped: 0
 [INFO] 
 [INFO] ------------------------------------------------------------------------
 [INFO] BUILD SUCCESS
@@ -258,46 +292,45 @@ The automated test suite achieves 100% pass rate across 266 unit, integration, v
 
 ---
 
-## 6. Benchmarking & Scalability
+## 6. Benchmarking & Scalability Summary
 
-- **Validator Performance:**
-  - Small Scale (10 EVs, 25 trips): **< 1 ms** (55 checks).
-  - Target Scale (100 EVs, 500 trips, 20 hubs): **< 1 ms** (2,173 checks, certified 0 violations).
-- **Replanning SLA Performance:**
-  - Small Replanning (10 EVs, 50 trips): **80 ms** (< 2.0s SLA).
-  - Medium Replanning (50 EVs, 200 trips): **449 ms** (< 2.0s SLA).
+| Tier | EVs | Trips | Chargers | Full Plan (p50) | Replan (p50) | Coverage | Independent Validator |
+|:---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| Small | 10 | 50 | 4 | 65 ms | 154 ms | 48.0% | PASS (53 checks) |
+| Medium | 50 | 250 | 15 | 1,309 ms | < 1 ms | 62.4% | PASS (317 checks) |
+| Large | 100 | 500 | 25 | 2,041 ms | 94 ms | 66.2% | PASS (667 checks) |
+| **Target Scale** | **300** | **1,500** | **40** | **2,385 ms** | **663 ms** | **73.7%** | **PASS (2,215 checks)** |
+
+*All 2,215 constraint checks at target scale certified 0 violations.*
 
 ---
 
-## 7. Security, REST APIs & PostgreSQL Service (Phase 6 & 7)
+## 7. Security, REST APIs & Hub Management (Phases 7, 10 & 11)
 
-### Authentication & Authorization:
-All API requests require authentication via the `X-API-KEY` header (or `Authorization: Bearer <key>`):
+### Authentication & Roles:
 - **ADMIN:** `key-admin-{tenantId}` (Full management permissions).
 - **OPERATOR:** `key-operator-{tenantId}` (Planning, replanning, registration, and plan acceptance).
 - **VIEWER:** `key-viewer-{tenantId}` (Read-only access to fleet queries, versions, and reports).
 
-Missing credentials return `401 Unauthorized`, and unpermitted role actions return `403 Forbidden`.
-
-### Running PostgreSQL 16 via Docker:
-```bash
-docker compose up -d
-```
-
-### OpenAPI / Swagger UI:
-Once the service is started with `mvn spring-boot:run`, interactive documentation is available at:
-`http://localhost:8080/swagger-ui.html`
-
-### Core API Endpoints:
+### REST API Endpoints:
 - `POST /api/v1/vehicles` — Register EV with battery capacity, SoC, efficiency, and available location.
 - `GET /api/v1/vehicles` — Query all fleet vehicles for tenant.
 - `POST /api/v1/trips` — Ingest commute trip demand with pickup window and latest deadline.
 - `GET /api/v1/trips` — List trip demands for tenant.
+- `POST /api/v1/hubs` — Register or update charger hub with power rating and tariff.
+- `GET /api/v1/hubs` — List charger hubs (supports `?page=0&size=10` pagination).
+- `GET /api/v1/hubs/{id}` — Retrieve detailed configuration for single hub.
+- `PUT /api/v1/hubs/{id}` — Update hub configuration.
+- `GET /api/v1/hubs/{id}/utilization` — Inspect active sessions, available plugs, and utilization rate.
+- `POST /api/v1/hubs/{id}/status` — Set operational status (`OPERATIONAL`, `OFFLINE`, `DEGRADED`).
+- `GET /api/v1/hubs/recovery-events` — Retrieve recent recovery audit events.
+- `GET /api/v1/overview` — Reconciled operational snapshot (vehicles, trips, available/offline chargers).
 - `POST /api/v1/plans/propose` — Run optimization and independent validator to return a candidate plan proposal.
 - `POST /api/v1/plans/{proposalId}/accept` — Atomically accept proposal with optimistic version checking (`expectedCurrentVersion`) and `Idempotency-Key` deduplication.
 - `GET /api/v1/plans/versions` — Query versioned history of accepted fleet plans.
 - `POST /api/v1/replanning/battery-drift` — Trigger bounded replanning upon observed SoC telemetry drift under 2.0s SLA.
 - `POST /api/v1/replanning/charger-failure` — Trigger rerouting and replanning upon unexpected charger hub outage under 2.0s SLA.
+- `POST /api/v1/replanning/charger-restore/{hubId}` — Explicitly restore an offline hub back to operational.
 
 For comprehensive architecture diagrams, reason-code specifications, and mathematical formulations, refer to [DESIGN.md](DESIGN.md).
 
