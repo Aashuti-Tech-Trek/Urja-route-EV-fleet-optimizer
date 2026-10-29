@@ -130,7 +130,7 @@ public final class VehicleTimeline {
     }
 
     public double getTotalDistanceKm() {
-        return events.stream().mapToDouble(TimelineEvent::getDistanceKm).sum();
+        return events.stream().mapToDouble(e -> e.getDistanceKm()).sum();
     }
 
     public double getTotalEnergyConsumedKwh() {
@@ -143,7 +143,7 @@ public final class VehicleTimeline {
     public double getTotalEnergyChargedKwh() {
         return events.stream()
                 .filter(e -> e.getEnergyDeltaKwh() > 0)
-                .mapToDouble(TimelineEvent::getEnergyDeltaKwh)
+                .mapToDouble(e -> e.getEnergyDeltaKwh())
                 .sum();
     }
 

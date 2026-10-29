@@ -73,11 +73,11 @@ public final class FleetPlanResult {
     public PlanningQualityReport getQualityReport() { return qualityReport; }
 
     public List<TripAssignment> getEvAssignments() {
-        return tripAssignments.stream().filter(TripAssignment::isEvAssignment).collect(Collectors.toList());
+        return tripAssignments.stream().filter(a -> a.isEvAssignment()).collect(Collectors.toList());
     }
 
     public List<TripAssignment> getBackupAssignments() {
-        return tripAssignments.stream().filter(TripAssignment::isBackupAssignment).collect(Collectors.toList());
+        return tripAssignments.stream().filter(a -> a.isBackupAssignment()).collect(Collectors.toList());
     }
 
     @Override

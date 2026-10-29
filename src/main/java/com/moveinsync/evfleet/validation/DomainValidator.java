@@ -1,8 +1,6 @@
 package com.moveinsync.evfleet.validation;
 
 import com.moveinsync.evfleet.exception.InvalidDomainException;
-
-import java.util.Objects;
 import java.util.function.Function;
 
 /**

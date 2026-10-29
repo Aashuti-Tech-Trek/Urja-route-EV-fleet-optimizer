@@ -5,7 +5,6 @@ import com.moveinsync.evfleet.domain.ChargerHub;
 import com.moveinsync.evfleet.domain.ChargingSession;
 import com.moveinsync.evfleet.domain.Trip;
 import com.moveinsync.evfleet.domain.Vehicle;
-import com.moveinsync.evfleet.domain.VehicleStatus;
 import com.moveinsync.evfleet.energy.BatterySafetyCalculator;
 import com.moveinsync.evfleet.energy.EnergyFactors;
 import com.moveinsync.evfleet.energy.StandardEnergyModel;
@@ -13,8 +12,6 @@ import com.moveinsync.evfleet.exception.InvalidDomainException;
 import com.moveinsync.evfleet.location.Location;
 import com.moveinsync.evfleet.time.TariffRate;
 import com.moveinsync.evfleet.time.TariffSchedule;
-import com.moveinsync.evfleet.time.TariffSlot;
-import com.moveinsync.evfleet.time.TariffType;
 import com.moveinsync.evfleet.travel.DefaultTravelTimeEstimator;
 import com.moveinsync.evfleet.travel.DistanceMatrix;
 import com.moveinsync.evfleet.travel.TravelConfig;
@@ -26,7 +23,6 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
@@ -463,8 +459,8 @@ class Phase2QualityGateAuditTest {
             FleetPlanResult result = planner.plan(input);
 
             assertThat(result.getTripAssignments()).hasSize(2);
-            long evCount = result.getTripAssignments().stream().filter(TripAssignment::isEvAssignment).count();
-            long backupCount = result.getTripAssignments().stream().filter(TripAssignment::isBackupAssignment).count();
+            long evCount = result.getTripAssignments().stream().filter(a -> a.isEvAssignment()).count();
+            long backupCount = result.getTripAssignments().stream().filter(a -> a.isBackupAssignment()).count();
 
             assertThat(evCount + backupCount).isEqualTo(2);
             assertThat(result.getQualityReport().getTripsRequested()).isEqualTo(2);

@@ -1,11 +1,9 @@
 package com.moveinsync.evfleet.time;
 
-import com.moveinsync.evfleet.exception.InvalidDomainException;
 import com.moveinsync.evfleet.validation.DomainValidator;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Objects;
 import java.util.Optional;
 
 /**

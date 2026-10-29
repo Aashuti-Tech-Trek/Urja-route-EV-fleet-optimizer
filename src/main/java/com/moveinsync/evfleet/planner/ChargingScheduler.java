@@ -5,7 +5,6 @@ import com.moveinsync.evfleet.charging.TwoPartChargingCurve;
 import com.moveinsync.evfleet.domain.ChargerHub;
 import com.moveinsync.evfleet.domain.ChargingSession;
 import com.moveinsync.evfleet.domain.Vehicle;
-import com.moveinsync.evfleet.energy.BatterySafetyCalculator;
 import com.moveinsync.evfleet.energy.EnergyFactors;
 import com.moveinsync.evfleet.energy.EnergyModel;
 import com.moveinsync.evfleet.location.Location;

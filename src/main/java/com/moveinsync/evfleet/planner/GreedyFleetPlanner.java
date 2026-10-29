@@ -7,7 +7,6 @@ import com.moveinsync.evfleet.domain.Trip;
 import com.moveinsync.evfleet.domain.Vehicle;
 import com.moveinsync.evfleet.domain.VehicleAvailability;
 import com.moveinsync.evfleet.domain.VehicleState;
-import com.moveinsync.evfleet.domain.VehicleStatus;
 import com.moveinsync.evfleet.energy.EnergyFactors;
 import com.moveinsync.evfleet.energy.EnergyModel;
 import com.moveinsync.evfleet.energy.StandardEnergyModel;
@@ -21,7 +20,6 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -92,10 +90,10 @@ public final class GreedyFleetPlanner implements FleetPlanner {
         // 1. Initial sort by urgency and difficulty (scheduledStartTime asc, latestFinish asc, distanceKm desc, tripId asc)
         List<Trip> baselineTrips = new ArrayList<>(input.getTrips());
         baselineTrips.sort(Comparator
-                .comparing(Trip::getScheduledStartTime)
-                .thenComparing(Trip::getLatestAllowedFinishTime)
-                .thenComparing(Comparator.comparingDouble(Trip::getDistanceKm).reversed())
-                .thenComparing(Trip::getTripId));
+                .comparing((Trip t) -> t.getScheduledStartTime())
+                .thenComparing(t -> t.getLatestAllowedFinishTime())
+                .thenComparing(Comparator.comparingDouble((Trip t) -> t.getDistanceKm()).reversed())
+                .thenComparing(t -> t.getTripId()));
 
         // 2. Build initial greedy plan
         PlanBuild bestBuild = buildPlan(baselineTrips, input);
@@ -222,7 +220,7 @@ public final class GreedyFleetPlanner implements FleetPlanner {
 
     private PlanBuild buildPlan(List<Trip> trips, PlanningInput input) {
         List<Vehicle> sortedVehicles = new ArrayList<>(input.getVehicles());
-        sortedVehicles.sort(Comparator.comparing(Vehicle::getVehicleId));
+        sortedVehicles.sort(Comparator.comparing(v -> v.getVehicleId()));
 
         Map<String, VehicleTimeline> timelines = new HashMap<>();
         for (Vehicle v : sortedVehicles) {
@@ -334,16 +332,16 @@ public final class GreedyFleetPlanner implements FleetPlanner {
             }
         }
 
-        int backupCount = (int) assignments.stream().filter(TripAssignment::isBackupAssignment).count();
+        int backupCount = (int) assignments.stream().filter(a -> a.isBackupAssignment()).count();
         BigDecimal totalCost = sessions.stream()
-                .map(ChargingSession::getEstimatedCost)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                .map(s -> s.getEstimatedCost())
+                .reduce(BigDecimal.ZERO, (a, b) -> a.add(b));
 
         Map<String, BigDecimal> costByHub = new HashMap<>();
         Map<String, Integer> sessionsByHub = new HashMap<>();
         for (ChargingSession s : sessions) {
-            costByHub.merge(s.getHubId(), s.getEstimatedCost(), BigDecimal::add);
-            sessionsByHub.merge(s.getHubId(), 1, Integer::sum);
+            costByHub.merge(s.getHubId(), s.getEstimatedCost(), (a, b) -> a.add(b));
+            sessionsByHub.merge(s.getHubId(), 1, (a, b) -> a + b);
         }
 
         return new PlanBuild(assignments, timelines, sessions, costByHub, sessionsByHub, candidateEvaluations, backupCount, totalCost);

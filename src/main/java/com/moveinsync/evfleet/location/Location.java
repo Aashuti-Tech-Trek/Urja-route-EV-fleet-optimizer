@@ -3,8 +3,6 @@ package com.moveinsync.evfleet.location;
 import com.moveinsync.evfleet.exception.InvalidLocationException;
 import com.moveinsync.evfleet.validation.DomainValidator;
 
-import java.util.Objects;
-
 /**
  * Immutable value object representing a geographic point on Earth defined by latitude and longitude.
  *
