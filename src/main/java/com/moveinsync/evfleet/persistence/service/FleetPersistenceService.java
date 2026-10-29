@@ -9,6 +9,7 @@ import com.moveinsync.evfleet.location.Location;
 import com.moveinsync.evfleet.persistence.entity.*;
 import com.moveinsync.evfleet.persistence.repository.*;
 import com.moveinsync.evfleet.planner.*;
+import com.moveinsync.evfleet.security.SecurityUtils;
 import com.moveinsync.evfleet.time.TariffRate;
 import com.moveinsync.evfleet.time.TariffSchedule;
 import com.moveinsync.evfleet.validator.DefaultPlanValidator;
@@ -72,7 +73,8 @@ public class FleetPersistenceService {
         vehicle.setTenantId(tenantId);
         VehicleEntity saved = vehicleRepository.save(vehicle);
         auditRecordRepository.save(new AuditRecordEntity(
-            UUID.randomUUID().toString(), tenantId, "REGISTER_VEHICLE", "VEHICLE", saved.getId(), "Vehicle registered"
+            UUID.randomUUID().toString(), tenantId, SecurityUtils.getAuthenticatedActor(),
+            "REGISTER_VEHICLE", "VEHICLE", saved.getId(), UUID.randomUUID().toString(), "Vehicle registered"
         ));
         return saved;
     }
@@ -87,7 +89,8 @@ public class FleetPersistenceService {
         trip.setTenantId(tenantId);
         TripEntity saved = tripRepository.save(trip);
         auditRecordRepository.save(new AuditRecordEntity(
-            UUID.randomUUID().toString(), tenantId, "REGISTER_TRIP", "TRIP", saved.getId(), "Trip registered"
+            UUID.randomUUID().toString(), tenantId, SecurityUtils.getAuthenticatedActor(),
+            "REGISTER_TRIP", "TRIP", saved.getId(), UUID.randomUUID().toString(), "Trip registered"
         ));
         return saved;
     }
@@ -115,12 +118,18 @@ public class FleetPersistenceService {
         if (vehicleIds != null && !vehicleIds.isEmpty()) {
             Set<String> set = new HashSet<>(vehicleIds);
             vEntities = vEntities.stream().filter(v -> set.contains(v.getId())).toList();
+            if (vEntities.size() != set.size()) {
+                throw new IllegalArgumentException("One or more vehicle IDs not found or do not belong to tenant: " + tenantId);
+            }
         }
 
         List<TripEntity> tEntities = tripRepository.findByTenantId(tenantId);
         if (tripIds != null && !tripIds.isEmpty()) {
             Set<String> set = new HashSet<>(tripIds);
             tEntities = tEntities.stream().filter(t -> set.contains(t.getId())).toList();
+            if (tEntities.size() != set.size()) {
+                throw new IllegalArgumentException("One or more trip IDs not found or do not belong to tenant: " + tenantId);
+            }
         }
 
         List<ChargerHubEntity> hEntities = chargerHubRepository.findByTenantId(tenantId);
@@ -233,7 +242,8 @@ public class FleetPersistenceService {
         }
 
         auditRecordRepository.save(new AuditRecordEntity(
-            UUID.randomUUID().toString(), tenantId, "CREATE_PROPOSAL", "PROPOSAL", proposalId,
+            UUID.randomUUID().toString(), tenantId, SecurityUtils.getAuthenticatedActor(),
+            "CREATE_PROPOSAL", "PROPOSAL", proposalId, UUID.randomUUID().toString(),
             "Created plan proposal isValid=" + report.isValid()
         ));
 
@@ -283,7 +293,8 @@ public class FleetPersistenceService {
         PlanVersionEntity savedVersion = planVersionRepository.save(newVersion);
 
         auditRecordRepository.save(new AuditRecordEntity(
-            UUID.randomUUID().toString(), tenantId, "ACCEPT_PLAN", "PLAN_VERSION", savedVersion.getId(),
+            UUID.randomUUID().toString(), tenantId, SecurityUtils.getAuthenticatedActor(),
+            "ACCEPT_PLAN", "PLAN_VERSION", savedVersion.getId(), UUID.randomUUID().toString(),
             "Accepted proposal " + proposalId + " as version " + newVersionNumber
         ));
 
@@ -305,7 +316,7 @@ public class FleetPersistenceService {
     }
 
     @Transactional
-    public void saveIdempotencyRecord(String key, String tenantId, String payload, int status) {
-        idempotencyRecordRepository.save(new IdempotencyRecordEntity(key, tenantId, payload, status));
+    public void saveIdempotencyRecord(String key, String tenantId, String requestFingerprint, String payload, int status) {
+        idempotencyRecordRepository.save(new IdempotencyRecordEntity(key, tenantId, requestFingerprint, payload, status));
     }
 }

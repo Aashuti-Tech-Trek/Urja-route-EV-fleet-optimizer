@@ -244,12 +244,12 @@ mvn test -Dtest="PlanValidatorTest,PlanValidatorBenchmarkTest"
 
 ## 5. Test Suite & Verification Results
 
-The automated test suite achieves 100% pass rate across 260 unit, integration, validation, replanning, and API tests:
+The automated test suite achieves 100% pass rate across 266 unit, integration, validation, replanning, security, and API tests:
 
 ```
 [INFO] Results:
 [INFO] 
-[INFO] Tests run: 260, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Tests run: 266, Failures: 0, Errors: 0, Skipped: 0
 [INFO] 
 [INFO] ------------------------------------------------------------------------
 [INFO] BUILD SUCCESS
@@ -269,7 +269,15 @@ The automated test suite achieves 100% pass rate across 260 unit, integration, v
 
 ---
 
-## 7. REST APIs & PostgreSQL Service (Phase 6)
+## 7. Security, REST APIs & PostgreSQL Service (Phase 6 & 7)
+
+### Authentication & Authorization:
+All API requests require authentication via the `X-API-KEY` header (or `Authorization: Bearer <key>`):
+- **ADMIN:** `key-admin-{tenantId}` (Full management permissions).
+- **OPERATOR:** `key-operator-{tenantId}` (Planning, replanning, registration, and plan acceptance).
+- **VIEWER:** `key-viewer-{tenantId}` (Read-only access to fleet queries, versions, and reports).
+
+Missing credentials return `401 Unauthorized`, and unpermitted role actions return `403 Forbidden`.
 
 ### Running PostgreSQL 16 via Docker:
 ```bash

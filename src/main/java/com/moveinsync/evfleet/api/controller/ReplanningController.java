@@ -13,6 +13,7 @@ import com.moveinsync.evfleet.planner.FleetPlanResult;
 import com.moveinsync.evfleet.planner.GreedyFleetPlanner;
 import com.moveinsync.evfleet.planner.PlanningInput;
 import com.moveinsync.evfleet.replan.*;
+import com.moveinsync.evfleet.security.SecurityUtils;
 import com.moveinsync.evfleet.time.TariffRate;
 import com.moveinsync.evfleet.time.TariffSchedule;
 import io.swagger.v3.oas.annotations.Operation;
@@ -21,8 +22,6 @@ import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.Duration;
-import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
@@ -43,9 +42,9 @@ public class ReplanningController {
     @PostMapping("/battery-drift")
     @Operation(summary = "Handle real-time battery drift event under 2.0s SLA")
     public ResponseEntity<ReplanningApiResponse> handleBatteryDrift(
-            @RequestHeader(name = "X-Tenant-ID", defaultValue = "default") String tenantId,
             @Valid @RequestBody BatteryDriftRequest request) {
 
+        String tenantId = SecurityUtils.getAuthenticatedTenantId();
         PlanningInput input = buildDefaultInput(tenantId);
         FleetPlanResult currentPlan = GreedyFleetPlanner.createFastReplanner().plan(input);
 
@@ -68,9 +67,9 @@ public class ReplanningController {
     @PostMapping("/charger-failure")
     @Operation(summary = "Handle charger hub outage event under 2.0s SLA")
     public ResponseEntity<ReplanningApiResponse> handleChargerFailure(
-            @RequestHeader(name = "X-Tenant-ID", defaultValue = "default") String tenantId,
             @Valid @RequestBody ChargerFailureRequest request) {
 
+        String tenantId = SecurityUtils.getAuthenticatedTenantId();
         PlanningInput input = buildDefaultInput(tenantId);
         FleetPlanResult currentPlan = GreedyFleetPlanner.createFastReplanner().plan(input);
 

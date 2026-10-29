@@ -14,6 +14,9 @@ public class AuditRecordEntity {
     @Column(name = "tenant_id", length = 64, nullable = false)
     private String tenantId;
 
+    @Column(name = "actor_id", length = 128)
+    private String actorId;
+
     @Column(name = "action", length = 64, nullable = false)
     private String action;
 
@@ -23,6 +26,9 @@ public class AuditRecordEntity {
     @Column(name = "entity_id", length = 64, nullable = false)
     private String entityId;
 
+    @Column(name = "correlation_id", length = 64)
+    private String correlationId;
+
     @Column(name = "details", columnDefinition = "TEXT")
     private String details;
 
@@ -31,13 +37,15 @@ public class AuditRecordEntity {
 
     public AuditRecordEntity() {}
 
-    public AuditRecordEntity(String id, String tenantId, String action, String entityType,
-                             String entityId, String details) {
+    public AuditRecordEntity(String id, String tenantId, String actorId, String action,
+                             String entityType, String entityId, String correlationId, String details) {
         this.id = id;
         this.tenantId = tenantId;
+        this.actorId = actorId;
         this.action = action;
         this.entityType = entityType;
         this.entityId = entityId;
+        this.correlationId = correlationId;
         this.details = details;
         this.timestamp = Instant.now();
     }
@@ -48,6 +56,9 @@ public class AuditRecordEntity {
     public String getTenantId() { return tenantId; }
     public void setTenantId(String tenantId) { this.tenantId = tenantId; }
 
+    public String getActorId() { return actorId; }
+    public void setActorId(String actorId) { this.actorId = actorId; }
+
     public String getAction() { return action; }
     public void setAction(String action) { this.action = action; }
 
@@ -56,6 +67,9 @@ public class AuditRecordEntity {
 
     public String getEntityId() { return entityId; }
     public void setEntityId(String entityId) { this.entityId = entityId; }
+
+    public String getCorrelationId() { return correlationId; }
+    public void setCorrelationId(String correlationId) { this.correlationId = correlationId; }
 
     public String getDetails() { return details; }
     public void setDetails(String details) { this.details = details; }

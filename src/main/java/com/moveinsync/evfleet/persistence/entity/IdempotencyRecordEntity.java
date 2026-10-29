@@ -14,6 +14,9 @@ public class IdempotencyRecordEntity {
     @Column(name = "tenant_id", length = 64, nullable = false)
     private String tenantId;
 
+    @Column(name = "request_fingerprint", length = 128)
+    private String requestFingerprint;
+
     @Column(name = "response_payload", columnDefinition = "TEXT", nullable = false)
     private String responsePayload;
 
@@ -25,9 +28,11 @@ public class IdempotencyRecordEntity {
 
     public IdempotencyRecordEntity() {}
 
-    public IdempotencyRecordEntity(String idempotencyKey, String tenantId, String responsePayload, int httpStatus) {
+    public IdempotencyRecordEntity(String idempotencyKey, String tenantId, String requestFingerprint,
+                                   String responsePayload, int httpStatus) {
         this.idempotencyKey = idempotencyKey;
         this.tenantId = tenantId;
+        this.requestFingerprint = requestFingerprint;
         this.responsePayload = responsePayload;
         this.httpStatus = httpStatus;
         this.createdAt = Instant.now();
@@ -38,6 +43,9 @@ public class IdempotencyRecordEntity {
 
     public String getTenantId() { return tenantId; }
     public void setTenantId(String tenantId) { this.tenantId = tenantId; }
+
+    public String getRequestFingerprint() { return requestFingerprint; }
+    public void setRequestFingerprint(String requestFingerprint) { this.requestFingerprint = requestFingerprint; }
 
     public String getResponsePayload() { return responsePayload; }
     public void setResponsePayload(String responsePayload) { this.responsePayload = responsePayload; }

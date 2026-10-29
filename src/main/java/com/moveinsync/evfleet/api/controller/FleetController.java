@@ -4,6 +4,7 @@ import com.moveinsync.evfleet.api.dto.VehicleRequest;
 import com.moveinsync.evfleet.api.dto.VehicleResponse;
 import com.moveinsync.evfleet.persistence.entity.VehicleEntity;
 import com.moveinsync.evfleet.persistence.service.FleetPersistenceService;
+import com.moveinsync.evfleet.security.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -27,9 +28,9 @@ public class FleetController {
     @PostMapping
     @Operation(summary = "Register or update an EV in the fleet")
     public ResponseEntity<VehicleResponse> registerVehicle(
-            @RequestHeader(name = "X-Tenant-ID", defaultValue = "default") String tenantId,
             @Valid @RequestBody VehicleRequest request) {
 
+        String tenantId = SecurityUtils.getAuthenticatedTenantId();
         VehicleEntity entity = new VehicleEntity(
             request.id(),
             tenantId,
@@ -57,9 +58,9 @@ public class FleetController {
 
     @GetMapping
     @Operation(summary = "List all vehicles for tenant")
-    public ResponseEntity<List<VehicleResponse>> listVehicles(
-            @RequestHeader(name = "X-Tenant-ID", defaultValue = "default") String tenantId) {
+    public ResponseEntity<List<VehicleResponse>> listVehicles() {
 
+        String tenantId = SecurityUtils.getAuthenticatedTenantId();
         List<VehicleResponse> responses = fleetService.getVehicles(tenantId).stream()
             .map(v -> new VehicleResponse(
                 v.getId(),

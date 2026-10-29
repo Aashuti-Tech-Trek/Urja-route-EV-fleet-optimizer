@@ -8,4 +8,10 @@ public record ChargerFailureRequest(
     @NotBlank String hubId,
     @NotNull Instant outageStart,
     @NotNull Instant estimatedRestoration
-) {}
+) {
+    public ChargerFailureRequest {
+        if (outageStart != null && estimatedRestoration != null && !estimatedRestoration.isAfter(outageStart)) {
+            throw new IllegalArgumentException("estimatedRestoration must be strictly after outageStart");
+        }
+    }
+}

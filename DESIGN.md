@@ -283,25 +283,33 @@ $$\sum_{s \in \text{Sessions}(H)} \mathbb{I}(s_{\text{start}} \le t < s_{\text{e
 | **Multi-Tenant Fleet REST APIs** | `FleetController`, `TripController` | `PlanningIntegrationTest#testEndToEndPlanningFlow` | **COMPLETE** |
 | **Atomic Plan Acceptance & CAS** | `PlanningController`, `FleetPersistenceService` | `PlanningIntegrationTest#testVersionConflictReturns409` | **COMPLETE** |
 | **Idempotency Deduplication** | `IdempotencyRecordRepository` | `PlanningIntegrationTest#testIdempotentAcceptance` | **COMPLETE** |
+| **API Key Authentication & RBAC** | `ApiKeyAuthenticationFilter`, `SecurityConfig` | `SecurityAndReliabilityIntegrationTest#testMissingOrInvalidCredentialsReturns401` | **COMPLETE** |
+| **Server-Side Tenant Isolation** | `SecurityUtils`, `FleetPersistenceService` | `SecurityAndReliabilityIntegrationTest#testStrictTenantIsolation` | **COMPLETE** |
+| **Payload Fingerprinting Conflict** | `PlanningController`, `IdempotencyRecordEntity` | `SecurityAndReliabilityIntegrationTest#testIdempotencyKeyWithMismatchedPayloadReturns409` | **COMPLETE** |
+| **Append-Only Auditing with Actor** | `AuditRecordEntity`, `V3__add_audit_actor...` | Audit logging with actor & correlation ID | **COMPLETE** |
 
 ---
 
-## 11. Phase 6 Architecture: Multi-Tenant REST APIs & Optimistic Plan Versioning
+## 11. Phase 6 & Phase 7 Architecture: Security, Reliability, Multi-Tenancy & Concurrency
 
-### A. Persistence & Multi-Tenancy
-- **Tenant Isolation:** All entities (`TenantEntity`, `VehicleEntity`, `TripEntity`, `ChargerHubEntity`, `PlanProposalEntity`, `PlanVersionEntity`, `TripAssignmentEntity`, `ChargingSessionEntity`, `AuditRecordEntity`, `IdempotencyRecordEntity`) carry strict `tenant_id` foreign keys and indexed constraints.
-- **Flyway Migrations:** `V1__initial_schema.sql` establishes production-ready relational schemas with referential integrity and cascading deletions.
-- **Docker Compose:** Fully reproducible PostgreSQL 16 Alpine container with readiness health check (`pg_isready`).
+### A. Authentication & Role-Based Access Control (RBAC)
+- **Token Mechanism:** Stateless API key authentication via `X-API-KEY` header (or `Authorization: Bearer <key>`) mapped through `ApiKeyAuthenticationFilter`.
+- **Role Permission Matrix:**
+  | Operation | Endpoint | Allowed Roles |
+  | :--- | :--- | :--- |
+  | View Fleet / Plans / Trips | `GET /api/v1/**` | `VIEWER`, `OPERATOR`, `ADMIN` |
+  | Register Vehicle / Hub / Trip | `POST /api/v1/vehicles`, `POST /api/v1/trips` | `OPERATOR`, `ADMIN` |
+  | Propose & Accept Plan | `POST /api/v1/plans/propose`, `POST /api/v1/plans/{id}/accept` | `OPERATOR`, `ADMIN` |
+  | Trigger Replanning | `POST /api/v1/replanning/**` | `OPERATOR`, `ADMIN` |
+- **Security Responses:** Missing or invalid keys trigger RFC 7807 `401 Unauthorized`. Insufficient privileges trigger RFC 7807 `403 Forbidden`.
 
-### B. Optimistic Locking & Compare-and-Set (CAS) Acceptance
-- Every candidate plan begins as a `PlanProposal`.
-- Acceptance endpoint `POST /api/v1/plans/{proposalId}/accept` requires an `expectedCurrentVersion` field.
-- If the current active version in the database diverges from `expectedCurrentVersion`, an RFC 7807 `409 Conflict` `ProblemDetail` is returned, preventing concurrent overwrite hazards.
-- Accepted proposals atomically transition to `PlanVersionEntity` with status `ACCEPTED`, marking the former version as `SUPERSEDED`.
+### B. Strict Server-Side Tenant Isolation
+- **Context Derivation:** All business logic resolves the tenant ID exclusively from `SecurityUtils.getAuthenticatedTenantId()`. Client-supplied tenant IDs in headers are ignored for authorization.
+- **Resource Ownership:** `generatePlanProposal` strictly checks that any explicitly referenced `vehicleIds` or `tripIds` belong to the authenticated tenant, rejecting cross-tenant injections with `400 Bad Request`.
 
-### C. Idempotency Key De-duplication
-- Mutation requests support the `Idempotency-Key` HTTP header.
-- Repeated submissions return the exact original JSON response and HTTP status code from `IdempotencyRecordEntity` without repeating optimization or database mutations.
+### C. Concurrency, Optimistic Locking & Idempotency Fingerprinting
+- **Atomic Acceptance:** Competing acceptance attempts must provide `expectedCurrentVersion`. Version mismatches immediately abort with `409 Conflict`.
+- **Idempotency Fingerprinting:** Requests with `Idempotency-Key` compute a SHA-256 fingerprint over the operational payload. Replaying the identical key with modified parameters returns `409 Conflict`, while identical replays return the cached response.
 
 ---
 

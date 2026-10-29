@@ -4,6 +4,7 @@ import com.moveinsync.evfleet.api.dto.TripRequest;
 import com.moveinsync.evfleet.api.dto.TripResponse;
 import com.moveinsync.evfleet.persistence.entity.TripEntity;
 import com.moveinsync.evfleet.persistence.service.FleetPersistenceService;
+import com.moveinsync.evfleet.security.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -27,9 +28,9 @@ public class TripController {
     @PostMapping
     @Operation(summary = "Ingest a trip demand request")
     public ResponseEntity<TripResponse> registerTrip(
-            @RequestHeader(name = "X-Tenant-ID", defaultValue = "default") String tenantId,
             @Valid @RequestBody TripRequest request) {
 
+        String tenantId = SecurityUtils.getAuthenticatedTenantId();
         TripEntity entity = new TripEntity(
             request.id(),
             tenantId,
@@ -61,9 +62,9 @@ public class TripController {
 
     @GetMapping
     @Operation(summary = "List all trips for tenant")
-    public ResponseEntity<List<TripResponse>> listTrips(
-            @RequestHeader(name = "X-Tenant-ID", defaultValue = "default") String tenantId) {
+    public ResponseEntity<List<TripResponse>> listTrips() {
 
+        String tenantId = SecurityUtils.getAuthenticatedTenantId();
         List<TripResponse> responses = fleetService.getTrips(tenantId).stream()
             .map(t -> new TripResponse(
                 t.getId(),

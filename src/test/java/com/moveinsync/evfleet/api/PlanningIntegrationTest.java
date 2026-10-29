@@ -18,7 +18,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-import static org.hamcrest.Matchers.*;
+import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -40,6 +40,7 @@ public class PlanningIntegrationTest {
     @DisplayName("Complete end-to-end flow: Vehicle & Trip Registration, Propose Plan, and Atomic Accept")
     void testEndToEndPlanningFlow() throws Exception {
         String tenant = "tenant-e2e-" + UUID.randomUUID();
+        String apiKey = "key-operator-" + tenant;
         fleetService.registerHub(tenant, new ChargerHubEntity("hub-1", tenant, "Central Hub", "HUB_LOC", 4));
         Instant now = Instant.now();
 
@@ -48,7 +49,7 @@ public class PlanningIntegrationTest {
             "EV-IT-1", 0.90, 60.0, 0.20, 50.0, "BASE", now
         );
         mockMvc.perform(post("/api/v1/vehicles")
-                .header("X-Tenant-ID", tenant)
+                .header("X-API-KEY", apiKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(vReq)))
             .andExpect(status().isCreated())
@@ -63,7 +64,7 @@ public class PlanningIntegrationTest {
             15.0, 1
         );
         mockMvc.perform(post("/api/v1/trips")
-                .header("X-Tenant-ID", tenant)
+                .header("X-API-KEY", apiKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(tReq)))
             .andExpect(status().isCreated())
@@ -75,7 +76,7 @@ public class PlanningIntegrationTest {
             List.of("EV-IT-1"), List.of("TRIP-IT-1")
         );
         String proposeContent = mockMvc.perform(post("/api/v1/plans/propose")
-                .header("X-Tenant-ID", tenant)
+                .header("X-API-KEY", apiKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(planReq)))
             .andExpect(status().isCreated())
@@ -88,7 +89,7 @@ public class PlanningIntegrationTest {
         // 4. Accept Plan Proposal
         AcceptPlanRequest acceptReq = new AcceptPlanRequest(0L); // expected version 0
         mockMvc.perform(post("/api/v1/plans/" + proposal.proposalId() + "/accept")
-                .header("X-Tenant-ID", tenant)
+                .header("X-API-KEY", apiKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(acceptReq)))
             .andExpect(status().isOk())
@@ -97,7 +98,7 @@ public class PlanningIntegrationTest {
 
         // 5. Verify plan versions list
         mockMvc.perform(get("/api/v1/plans/versions")
-                .header("X-Tenant-ID", tenant))
+                .header("X-API-KEY", apiKey))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$", hasSize(1)))
             .andExpect(jsonPath("$[0].versionNumber").value(1L));
@@ -107,6 +108,7 @@ public class PlanningIntegrationTest {
     @DisplayName("Optimistic locking conflict: accepting when expectedVersion does not match returns 409")
     void testVersionConflictReturns409() throws Exception {
         String tenant = "tenant-conflict-" + UUID.randomUUID();
+        String apiKey = "key-operator-" + tenant;
         fleetService.registerHub(tenant, new ChargerHubEntity("hub-1", tenant, "Central Hub", "HUB_LOC", 4));
         Instant now = Instant.now();
 
@@ -125,7 +127,7 @@ public class PlanningIntegrationTest {
         // Mismatched expected version (e.g., 99 instead of current 0)
         AcceptPlanRequest badAcceptReq = new AcceptPlanRequest(99L);
         mockMvc.perform(post("/api/v1/plans/" + proposal.proposalId() + "/accept")
-                .header("X-Tenant-ID", tenant)
+                .header("X-API-KEY", apiKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(badAcceptReq)))
             .andExpect(status().isConflict())
@@ -136,6 +138,7 @@ public class PlanningIntegrationTest {
     @DisplayName("Idempotent acceptance: re-submitting with same Idempotency-Key returns same payload")
     void testIdempotentAcceptance() throws Exception {
         String tenant = "tenant-idem-" + UUID.randomUUID();
+        String apiKey = "key-operator-" + tenant;
         fleetService.registerHub(tenant, new ChargerHubEntity("hub-1", tenant, "Central Hub", "HUB_LOC", 4));
         Instant now = Instant.now();
 
@@ -156,7 +159,7 @@ public class PlanningIntegrationTest {
 
         // First call
         String response1 = mockMvc.perform(post("/api/v1/plans/" + proposal.proposalId() + "/accept")
-                .header("X-Tenant-ID", tenant)
+                .header("X-API-KEY", apiKey)
                 .header("Idempotency-Key", idempotencyKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(acceptReq)))
@@ -165,7 +168,7 @@ public class PlanningIntegrationTest {
 
         // Second duplicate call with same idempotency key
         String response2 = mockMvc.perform(post("/api/v1/plans/" + proposal.proposalId() + "/accept")
-                .header("X-Tenant-ID", tenant)
+                .header("X-API-KEY", apiKey)
                 .header("Idempotency-Key", idempotencyKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(acceptReq)))
