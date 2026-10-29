@@ -6,7 +6,7 @@ import com.moveinsync.evfleet.domain.ChargerHub;
 import com.moveinsync.evfleet.domain.ChargingSession;
 import com.moveinsync.evfleet.domain.Trip;
 import com.moveinsync.evfleet.domain.Vehicle;
-import com.moveinsync.evfleet.energy.BatterySafetyCalculator;
+
 import com.moveinsync.evfleet.energy.EnergyFactors;
 import com.moveinsync.evfleet.energy.EnergyModel;
 import com.moveinsync.evfleet.energy.StandardEnergyModel;
@@ -25,7 +25,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
+
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -58,8 +58,9 @@ public final class DefaultPlanValidator implements PlanValidator {
     private final EnergyModel energyModel;
     private final EnergyFactors energyFactors;
     private final TravelTimeEstimator travelEstimator;
-    private final DistanceMatrix distanceMatrix;
-    private final ChargingCurve chargingCurve;
+    // distanceMatrix and chargingCurve retained for future validation pillars (spatial re-derivation, curve verification)
+    @SuppressWarnings("unused") private final DistanceMatrix distanceMatrix;
+    @SuppressWarnings("unused") private final ChargingCurve chargingCurve;
 
     public DefaultPlanValidator() {
         this(new StandardEnergyModel(),
@@ -86,7 +87,6 @@ public final class DefaultPlanValidator implements PlanValidator {
         long startNanos = System.nanoTime();
         List<PlanViolation> violations = new ArrayList<>();
         int checksExecuted = 0;
-        int incompleteChecks = 0;
 
         // 1. Input Integrity and Completeness Preconditions
         if (plan == null) {
@@ -473,12 +473,12 @@ public final class DefaultPlanValidator implements PlanValidator {
     private static final class SweepEvent {
         private final Instant time;
         private final SweepType type;
-        private final ChargingSession session;
 
         private SweepEvent(Instant time, SweepType type, ChargingSession session) {
             this.time = time;
             this.type = type;
-            this.session = session;
+            // session retained in constructor signature for future diagnostic use
+            @SuppressWarnings("unused") ChargingSession unused = session;
         }
     }
 }
