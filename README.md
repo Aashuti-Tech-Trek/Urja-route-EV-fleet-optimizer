@@ -61,6 +61,20 @@ The **MoveInSync EV Fleet Optimizer (UrjaRoute)** is an algorithmic planning and
     4. **Tariff Cost Reconciliation:** Re-evaluates energy cost per charging session independently against active `TariffSchedule` slots and validates aggregate plan cost integrity.
   - `ValidationReport`, `PlanViolation`, `ViolationCode`, `ValidationStatus`: Immutable diagnostic reporting with machine-readable violation codes and exact timestamps, entity IDs, and measured vs. expected metrics.
 
+### Phase 4: Plan Explainability, Cost Breakdown, Quality Metrics & Lower-Bound Analysis (COMPLETE)
+- **Structured Decision Explanations (`explain`):**
+  - `AssignmentExplanation`: Detailed breakdown of each trip assignment (decision type `EV_ASSIGNED` vs `BACKUP_ASSIGNED`, assigned vehicle, empty-drive distance & energy, SoC progression before/after, pickup arrival time, charging dependencies, and candidate alternatives evaluated).
+  - `ChargingExplanation`: Session-level justification including hub name, charger power, start/end SoC, duration, kWh delivered, tariff slots spanned, and electricity cost.
+  - `AlternativeEvaluation` & `AlternativeOutcome`: Transparent audit trail of non-selected vehicle candidates showing specific feasibility rejection reasons without fabricating outcomes.
+- **Cost Breakdown & Accounting (`explain`):**
+  - `CostBreakdown`: Verifiable electricity cost breakdown with hub-level and tariff-period subtotals, energy consumption totals, average cost per EV trip, and explicitly noted unmodelled backup cab costs.
+- **Plan Quality & Health Metrics (`explain`):**
+  - `PlanQualityReport`: Consolidated audit report encompassing EV coverage percentage, fleet utilization, charger concurrency peaks, minimum observed SoC, independent validator verification status, and optimizer runtime.
+- **Lower-Bound Benchmarking (`explain`):**
+  - `LowerBoundResult` & `LowerBoundStatus`: Sound mathematical lower bounds for backup-trip count and electricity charging cost with explicit assumptions and gap metrics, clearly differentiating heuristic solutions from theoretical lower bounds.
+- **Service Orchestration (`explain`):**
+  - `PlanExplanationService`: Zero-mutation, deterministic service generating comprehensive `PlanExplanation` records from inputs, fleet plan results, and independent validation reports.
+
 ---
 
 ## 3. Directory Structure
@@ -105,6 +119,17 @@ MoveInSync_EV_Fleet/
 │   │                   │   ├── InvalidTariffException.java
 │   │                   │   ├── InvalidTripException.java
 │   │                   │   └── InvalidVehicleException.java
+│   │                   ├── explain/
+│   │                   │   ├── AlternativeEvaluation.java
+│   │                   │   ├── AlternativeOutcome.java
+│   │                   │   ├── AssignmentExplanation.java
+│   │                   │   ├── ChargingExplanation.java
+│   │                   │   ├── CostBreakdown.java
+│   │                   │   ├── LowerBoundResult.java
+│   │                   │   ├── LowerBoundStatus.java
+│   │                   │   ├── PlanExplanation.java
+│   │                   │   ├── PlanExplanationService.java
+│   │                   │   └── PlanQualityReport.java
 │   │                   ├── location/
 │   │                   │   └── Location.java
 │   │                   ├── planner/

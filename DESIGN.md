@@ -271,6 +271,11 @@ $$\sum_{s \in \text{Sessions}(H)} \mathbb{I}(s_{\text{start}} \le t < s_{\text{e
 | **Tariff Reconciliation** | `DefaultPlanValidator` | `PlanValidatorTest#tariffCostReconciliation` | **COMPLETE** |
 | **Validator Scalability** | `PlanValidatorBenchmarkTest` | Target Scale 100 EVs/500 trips < 1 ms | **COMPLETE** |
 | **Deterministic Planning** | `GreedyFleetPlanner` | `GreedyFleetPlannerTest#deterministicOutput` | **COMPLETE** |
+| **Plan Explainability Service** | `PlanExplanationService` | `PlanExplanationServiceTest` (7 tests) | **COMPLETE** |
+| **Trip Assignment Audit Trail** | `AssignmentExplanation`, `AlternativeEvaluation` | `PlanExplanationServiceTest$BasicExplanationTests` | **COMPLETE** |
+| **Transparent Cost Breakdown** | `CostBreakdown` | `PlanExplanationServiceTest$CostBreakdownTests` | **COMPLETE** |
+| **Plan Quality & Health Metrics** | `PlanQualityReport` | `PlanExplanationServiceTest$PlanQualityReportTests` | **COMPLETE** |
+| **Sound Lower-Bound Analysis** | `LowerBoundResult`, `LowerBoundStatus` | `PlanExplanationServiceTest$LowerBoundAnalysisTests` | **COMPLETE** |
 
 ---
 
